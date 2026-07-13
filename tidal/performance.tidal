@@ -1,0 +1,62 @@
+-- CatharsisField ─ Tidal パターン層（Tier 2）
+-- Processing から localhost:6010 /ctrl (typetag "sf") で受信:
+--   charge: 溜めレベル 0..1（charging 中 30Hz）
+--   energy: 解放後エネルギー 1→0（約 3 秒で減衰）
+-- ghci -ghci-script BootTidal.hs -ghci-script tidal/performance.tidal で読み込む想定
+-- 全停止: hush
+
+setcps (100/60/4)
+
+:{
+let charge  = cF 0 "charge"
+    energy  = cF 0 "energy"
+    tension = charge + energy
+:}
+
+-- 心拍 ─ 溜め中だけ立ち上がる。安静時 50bpm 相当から満充填で 175bpm 相当まで加速
+:{
+p "heartbeat"
+  $ fast (realToFrac <$> segment 1 (1 + charge * 2.5))
+  $ sound "bd ~ bd ~"
+  # gain (charge * 1.15)
+  # speed (0.7 + charge * 0.5)
+  # lpf (150 + charge * 2500)
+  # shape 0.35
+:}
+
+-- グルーヴ ─ 解放直後に湧き、energy の減衰とともに段階的に崩れて消える
+:{
+p "groove"
+  $ degradeBy (segment 4 $ 1 - energy)
+  $ sound "hh*8 [~ cp] hh*4 [cp ~]"
+  # gain (energy * 1.0)
+  # speed (0.9 + energy * 0.3)
+  # hpf 400
+  # room 0.3 # size 0.7
+  # pan perlin
+:}
+
+-- 残光アルペジオ ─ 解放の余韻。energy が高いほど音数が多く、明るい
+:{
+p "afterglow"
+  $ degradeBy (segment 4 $ 0.9 - energy * 0.7)
+  $ n (arp "updown" "c'min7'4")
+  # sound "arpy"
+  # gain (energy * 0.9)
+  # speed 2
+  # lpf (600 + energy * 4000)
+  # room 0.6 # size 0.9
+  # legato 2
+:}
+
+-- アンビエント床 ─ 常時ごく薄く敷き、tension でわずかに開く
+:{
+p "ambient"
+  $ slow 8
+  $ sound "space:1 ~ ambi:2 ~"
+  # gain (0.55 + tension * 0.15)
+  # lpf (400 + tension * 1200)
+  # room 0.8 # size 0.95
+  # legato 1.5
+  # pan (slow 7 sine)
+:}
