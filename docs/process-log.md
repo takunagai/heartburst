@@ -129,6 +129,16 @@
 - デプロイ: `wrangler deploy`（静的アセット構成）→ https://catharsisfield.autumn-wave-9579.workers.dev/ ─ 本番 E2E（ゲート→溜め→解放、amp 0.45、コンソールエラー 0）まで確認
 - 学び: og:image は相対パスでなく絶対 URL（クローラ対応）。デプロイ後に URL が確定してから再ビルド・再デプロイの 2 段が素直
 
+## Phase 8: スキル化（2026-07-13）
+
+- `~/.claude/skills/interactive-art-builder/` を構築（計画正本: docs/skill-plan.md）
+- 分担: SKILL.md + wizard.md + architecture-template.md = Fable / references 4 本 = sonnet（4 並列フォークで分担執筆）/ templates 8 本 = sonnet
+- 委譲品質の学び:
+  - 「書けなかった項目は憶測で埋めず明記せよ」の指示が機能 ─ verification.md の欠落 2 箇所（E2E スクリプト・amp リスナー実装）は親のセッション知識で正確に補完できた。**セッション内でしか知らない手順は正本ドキュメントに残しておくこと**（今回の还流でカバー）
+  - templates の {{PLACEHOLDER}} は識別子位置で構文エラーになる → コードは有効識別子 + ヘッダーコメントで置換対象列挙、が正解
+  - 並列フォークの入れ子は 1 段まで（"Fork is not available inside a forked worker"）
+- 未実施: スモークテスト（新規ディレクトリでウィザード → 最小作品）。コンテキストの新鮮な別セッションで実施するのが計画どおり
+
 ## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）
