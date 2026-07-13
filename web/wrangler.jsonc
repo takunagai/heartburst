@@ -1,0 +1,8 @@
+{
+  // Cloudflare Workers 静的アセット配信（フレームワーク非依存の素の wrangler deploy を想定）
+  "name": "catharsisfield",
+  "compatibility_date": "2026-07-01",
+  "assets": {
+    "directory": "./dist",
+  },
+}

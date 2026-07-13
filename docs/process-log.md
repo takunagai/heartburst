@@ -97,6 +97,31 @@
   2. 粒子描画を `ellipse()` から `stroke + strokeWeight + point()`（GL ポイントスプライト）へ ─ P2D では大幅に軽い。**注意: stroke 状態が後続の rect/fill 描画に漏れるので、トレイル矩形・フラッシュ前に noStroke() を明示**
 - 計測手段: draw() 内で 120 フレームごとに `[perf] fps=... state=...` を println → ログ grep で状態別 fps を定量確認（HUD はユーザー側、ログは AI 側の観測手段として両輪）
 
-### 未解決・保留
+### Phase 6: ウェブ版移植（2026-07-13）
+
+### 構成と分担
+
+- 計画正本: `docs/web-port-plan.md`（技術対応表・5 フェーズ・AGPLv3 方針）
+- Phase 1（Vite+TS+p5 scaffold、粒子移植）: sonnet 委譲 ─ AudioEngine インターフェースを契約にして音響と分離
+- Phase 2（Web Audio 音響）+ Phase 3（Strudel）: Fable 直接実装
+- Strudel 裏取り: explorer 委譲で AGPLv3 制約を事前検出 → ユーザー判断（ソース公開で続行）を実装前に確定できた
+
+### ウェブ移植で踏んだ技術問題（スキル化必須知見）
+
+1. **p5 v2 の FES が偽陽性で fps を殺す**: HSB 4 引数 stroke() を「Invalid input」と誤検知し毎フレーム 4000 件ログ → それ自体が最大のボトルネック。`p5.disableFriendlyErrors = true` を本番必須に
+2. **pixelDensity(1) は createCanvas の後**: p5 v2 では前に呼ぶと無効（retina 4 倍ピクセルのまま）。canvas.width の実測で検証する
+3. **Web Audio の DelayNode フィードバックループは最小 128 サンプル**: 約 344Hz 超の Karplus-Strong が物理的に組めない（ペンタ音列ほぼ全滅）+ ループ内 BiquadFilter が不安定警告。**KS は起動時に JS でオフライン合成して AudioBuffer バンク化**（音程正確・再生コスト極小・警告根絶）
+4. **p5.noise はネイティブ Processing の noise() より桁違いに遅い**: 4000 粒子×60fps で idle が 30fps に落ちる。粒子ごとに 4 フレームに 1 回の再計算（スロット分散）+ lerp 平滑化で視覚品質を保ったまま 1/4 に削減
+5. **analyser 読み出し（getAmp）は毎フレーム 1 回に巻き上げ**（粒子ごと 4000 回呼んでいた ─ /simplify の指摘パターンの再発。契約：ループ不変値はループ外へ）
+6. **Strudel worklet は initAudioOnFirstClick では間に合わない**: ゲートのクリックは消費済みなので「次のクリック」を待ち続け AudioWorkletNode エラー。ユーザー操作後なら `initAudio()` を明示 await
+7. **fps 計測の罠**: 全状態でぴったり 30.0fps + long task ゼロ + フレーム間隔 33.3ms 均一 = 描画が重いのではなく **macOS/Chrome の省エネモードによる rAF 30Hz 制限**。フレーム予算計測（long task / フレーム間隔分布）で「重い」と「絞られてる」を区別する
+
+### 検証手法（ウェブ版）
+
+- chrome-devtools MCP で PointerEvent 合成 → ゲート突破・pop 連打・溜め→解放の全シーケンスを自動実行
+- 音の実出力は `window.__catharsisAudio.getAmp()` のサンプリングで数値検証（pop 0.83 / charge 0.18 / release 0.59 / 減衰後 0.003）
+- ビジュアルはスクリーンショットで状態別に確認（チャージ収束の白熱球・ヴィネット）
+
+## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）
