@@ -28,31 +28,14 @@ class OscBridge {
 
   // ---- 送信: SuperCollider ----
 
-  void sendChargeStart(float normX, float normY) {
-    OscMessage m = new OscMessage("/charge/start");
-    m.add(normX);
-    m.add(normY);
-    sendSafe(m, scAddr);
-  }
+  void sendChargeStart(float normX, float normY) { sendSc("/charge/start", normX, normY); }
+  void sendChargeLevel(float level)              { sendSc("/charge/level", level); }
+  void sendRelease(float level, float normX, float normY) { sendSc("/release", level, normX, normY); }
+  void sendPop(float normX, float normY)         { sendSc("/pop", normX, normY); }
 
-  void sendChargeLevel(float level) {
-    OscMessage m = new OscMessage("/charge/level");
-    m.add(level);
-    sendSafe(m, scAddr);
-  }
-
-  void sendRelease(float level, float normX, float normY) {
-    OscMessage m = new OscMessage("/release");
-    m.add(level);
-    m.add(normX);
-    m.add(normY);
-    sendSafe(m, scAddr);
-  }
-
-  void sendPop(float normX, float normY) {
-    OscMessage m = new OscMessage("/pop");
-    m.add(normX);
-    m.add(normY);
+  private void sendSc(String pattern, float... args) {
+    OscMessage m = new OscMessage(pattern);
+    for (float a : args) m.add(a);
     sendSafe(m, scAddr);
   }
 

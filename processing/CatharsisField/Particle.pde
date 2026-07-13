@@ -11,15 +11,22 @@ class Particle {
 
   float x, y;
   float vx, vy;
-  float colorMix;     // 0..1 シアン〜マゼンタの個体差補間比
   float baseSize;
   float noiseOffset;  // フローフィールドの個体差用オフセット
 
+  // 個体色は不変なので HSB 分解までコンストラクタで済ませる
+  // （display() で毎フレーム 4000 回の色空間変換をしない）
+  float hueVal, satVal, briBase;
+
   Particle() {
     respawnRandom();
-    colorMix = random(1.0);
     baseSize = random(1.4, 3.0);
     noiseOffset = random(1000.0);
+
+    color c = lerpColor(COLOR_CYAN, COLOR_MAGENTA, random(1.0)); // シアン〜マゼンタの個体差
+    hueVal = hue(c);
+    satVal = saturation(c);
+    briBase = brightness(c);
   }
 
   void respawnRandom() {
@@ -43,7 +50,7 @@ class Particle {
   void applyImpulse(float cx, float cy, float releaseLevel) {
     float dx = x - cx;
     float dy = y - cy;
-    float d = sqrt(dx * dx + dy * dy) + 0.001;
+    float d = mag(dx, dy) + 0.001;
     float speed = lerp(IMPULSE_SPEED_MIN, IMPULSE_SPEED_MAX, releaseLevel) * random(0.7, 1.3);
     vx += (dx / d) * speed;
     vy += (dy / d) * speed;
@@ -90,15 +97,12 @@ class Particle {
   private void chargingPull(PVector attractor, float chargeLevel) {
     float dx = attractor.x - x;
     float dy = attractor.y - y;
-    float d = sqrt(dx * dx + dy * dy) + 0.001;
+    float d = mag(dx, dy) + 0.001;
 
-    // chargeLevel が上がるほど軌道は収縮（集まりすぎて点にならないよう下限あり）
-    float minOrbit = lerp(MIN_ORBIT_RADIUS_MAX, MIN_ORBIT_RADIUS_MIN, chargeLevel);
-    float pullStrength = lerp(PULL_STRENGTH_MIN, PULL_STRENGTH_MAX, chargeLevel);
-
-    if (d > minOrbit) {
-      vx += (dx / d) * pullStrength;
-      vy += (dy / d) * pullStrength;
+    // 軌道半径・引力はフレーム不変（メインの draw() が 1 回だけ算出済み）
+    if (d > frameMinOrbit) {
+      vx += (dx / d) * framePullStrength;
+      vy += (dy / d) * framePullStrength;
     } else {
       // 軌道内では反発ジッターに切り替え、収束しすぎを防ぐ
       float jitter = JITTER_AMOUNT * chargeLevel;
@@ -118,21 +122,16 @@ class Particle {
   }
 
   void display(int pState, float chargeLevel, float ampSmoothed) {
-    color c = lerpColor(COLOR_CYAN, COLOR_MAGENTA, colorMix);
-    float baseBrightness = brightness(c);
-    float pSat = saturation(c);
-    float pHue = hue(c);
-
     // alpha は colorMode(HSB, 360, 100, 100, 100) のレンジ ─ 最大 100（255 ではない）
-    float bri = baseBrightness;
+    float bri = briBase;
     float alphaVal = 22;
     float sizeMul = 1.0;
 
     if (pState == STATE_IDLE) {
-      bri = baseBrightness * 0.5;
+      bri = briBase * 0.5;
       alphaVal = 18;
     } else if (pState == STATE_CHARGING) {
-      bri = lerp(baseBrightness * 0.6, 100, chargeLevel);
+      bri = lerp(briBase * 0.6, 100, chargeLevel);
       alphaVal = lerp(28, 88, chargeLevel);
       sizeMul = lerp(1.0, 1.6, chargeLevel);
     } else if (pState == STATE_RELEASING) {
@@ -140,14 +139,14 @@ class Particle {
       alphaVal = 95;
       sizeMul = 1.8;
     } else if (pState == STATE_DECAY) {
-      float speedMag = sqrt(vx * vx + vy * vy);
-      bri = lerp(baseBrightness * 0.5, 100, constrain(speedMag / 6.0, 0, 1));
+      float speedNorm = constrain(mag(vx, vy) / DECAY_SPEED_REF, 0, 1);
+      bri = lerp(briBase * 0.5, 100, speedNorm);
       bri = min(100, bri + ampSmoothed * 25); // /sc/amp によるグロー脈動
-      alphaVal = lerp(20, 82, constrain(speedMag / 6.0, 0, 1));
+      alphaVal = lerp(20, 82, speedNorm);
     }
 
     // ellipse より大幅に軽い GL ポイント描画（P2D では点スプライトになる）
-    stroke(pHue, pSat, bri, alphaVal);
+    stroke(hueVal, satVal, bri, alphaVal);
     strokeWeight(baseSize * sizeMul);
     point(x, y);
   }

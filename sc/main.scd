@@ -11,7 +11,9 @@
 ~reverbRoom    = 0.86;   // 残響の広さ
 ~reverbDamp    = 0.25;   // 残響の高域減衰
 ~ampSendRate   = 30;     // /sc/amp 送出レート（Hz）
+// ポート契約の正本は docs/architecture.md（変更時はそちらを先に更新）
 ~processingPort = 12000; // Processing の受信ポート
+~superDirtPort  = 57120; // SuperDirt が Tidal からの dirt メッセージを受けるポート（sclang langPort と同一）
 
 s = Server.default;
 s.options.numBuffers = 1024 * 16;  // Pluck/SuperDirt 用に多めに確保
@@ -28,6 +30,9 @@ s.waitForBoot {
 
 	// ── Processing への送信先 ──
 	~processingAddr = NetAddr("127.0.0.1", ~processingPort);
+
+	// ── OSC の正規化 x（0..1、欠損時 0.5）を pan（-1..1）へ写す共通ヘルパ ──
+	~xToPan = { |x| ((x ? 0.5) * 2) - 1 };
 
 	// ── ペンタトニック音列（C マイナーペンタ = 度数 0,3,5,7,10）──
 	~pentaDegrees = [0, 3, 5, 7, 10];
@@ -122,8 +127,7 @@ s.waitForBoot {
 	// /release level x y : ドローンを解放 → ドロップ+衝撃波+シャワー群を発火
 	OSCdef(\release, { |msg|
 		var level = msg[1].clip(0, 1);
-		var x   = (msg[2] ? 0.5);
-		var pan = (x * 2 - 1);
+		var pan = ~xToPan.(msg[2]);
 		if(~chargeSynth.notNil) { ~chargeSynth.release; ~chargeSynth = nil };
 		Synth(\dropBoom,  [\out, ~fxBus, \amp, level.linlin(0, 1, 0.3, 0.95), \pan, pan * 0.3], ~srcGroup);
 		Synth(\shockwave, [\out, ~fxBus, \amp, level.linlin(0, 1, 0.25, 0.7),  \pan, pan * 0.5], ~srcGroup);
@@ -147,11 +151,10 @@ s.waitForBoot {
 
 	// /pop x y : 短クリックの軽いプラック
 	OSCdef(\pop, { |msg|
-		var x = (msg[1] ? 0.5);
 		Synth(\popPluck, [\out, ~fxBus,
 			\freq, ~popFreqs.choose,
 			\amp, 0.4,
-			\pan, (x * 2 - 1) * 0.6], ~srcGroup);
+			\pan, ~xToPan.(msg[1]) * 0.6], ~srcGroup);
 	}, '/pop');
 
 	// /sc/ampReply : SendReply を受け Processing へ /sc/amp を転送（30Hz、疎結合の唯一の音→視覚線）
@@ -169,7 +172,7 @@ s.waitForBoot {
 		~dirt = superDirtClass.new(2, s);
 		~dirt.loadSoundFiles;
 		s.sync;
-		~dirt.start(57120, 0 ! 12);
+		~dirt.start(~superDirtPort, 0 ! 12);
 		"[CatharsisField] SuperDirt 起動完了（port 57120）".postln;
 	} {
 		"[CatharsisField] SuperDirt 未導入 ─ Tier 1（カスタム SynthDef のみ）で動作".postln;

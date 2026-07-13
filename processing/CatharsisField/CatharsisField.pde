@@ -63,6 +63,7 @@ final float SHOCKWAVE_RADIUS_MAX = 1300;
 
 final float SHAKE_DECAY = 0.85;
 final float FLASH_DECAY = 0.12; // 1〜2 フレームでほぼ消える急減衰
+final float DECAY_SPEED_REF = 6.0; // decay 中、この速度で粒子の輝度・alpha が飽和する
 
 final float VIGNETTE_INNER = 0.35;   // このデフォルト距離比から暗さが始まる
 final float VIGNETTE_MAX_ALPHA = 200; // level=1 のときのヴィネット最大不透明度
@@ -97,6 +98,10 @@ int popSparkCursor = 0;
 
 PVector attractorPos = new PVector();
 
+// フレーム不変値のキャッシュ（粒子ループ 4000 回で再計算しない）
+float bgHue, bgSat, bgBri;                    // 背景色の HSB 分解（起動時 1 回）
+float frameMinOrbit, framePullStrength;       // charging 中の引力パラメータ（フレームごと 1 回）
+
 PImage vignetteImg; // charging 中に画面端を暗くする放射グラデーション（起動時 1 回だけ生成）
 
 OscBridge osc;
@@ -114,6 +119,10 @@ void setup() {
   frameRate(60);
   background(BG_COLOR);
   noStroke();
+
+  bgHue = hue(BG_COLOR);
+  bgSat = saturation(BG_COLOR);
+  bgBri = brightness(BG_COLOR);
 
   osc = new OscBridge(this, RECEIVE_PORT, SC_HOST, SC_PORT, TIDAL_HOST, TIDAL_PORT);
 
@@ -160,12 +169,18 @@ void draw() {
   // alpha を上げるほどトレイルが短くなり、加算合成の白浮きも早く沈む
   blendMode(BLEND);
   noStroke(); // 粒子描画の stroke 状態を持ち越さない
-  fill(hue(BG_COLOR), saturation(BG_COLOR), brightness(BG_COLOR), 55);
+  fill(bgHue, bgSat, bgBri, 55);
   rect(-40, -40, width + 80, height + 80);
 
   blendMode(ADD);
 
   attractorPos.set(mouseX, mouseY);
+
+  // 粒子ループの不変値はフレームごとに 1 回だけ算出
+  if (state == STATE_CHARGING) {
+    frameMinOrbit = lerp(MIN_ORBIT_RADIUS_MAX, MIN_ORBIT_RADIUS_MIN, level);
+    framePullStrength = lerp(PULL_STRENGTH_MIN, PULL_STRENGTH_MAX, level);
+  }
 
   for (int i = 0; i < PARTICLE_COUNT; i++) {
     Particle p = particles[i];
@@ -198,7 +213,9 @@ void draw() {
     fill(0, 0, 100, flashAlpha);
     rect(0, 0, width, height);
   }
+  // 減衰は描画後に行う（release 直後の初回フレームを満輝度で見せるため。描画順に依存する点は意図的）
   flashAlpha *= FLASH_DECAY;
+  if (flashAlpha < 0.5) flashAlpha = 0;
 
   if (showHud) drawHud();
 
@@ -227,16 +244,18 @@ void updateCharging() {
   float eased = easeOutQuad(t);
   level = constrain(eased + dragBoost, 0, 1);
 
-  maybeSendThrottled();
+  if (oscTick()) {
+    osc.sendChargeLevel(level);
+    osc.sendCtrlCharge(level);
+  }
 }
 
 void updateDecay() {
   float elapsed = millis() - decayStartMillis;
   energy = constrain(1.0 - elapsed / DECAY_DURATION_MS, 0, 1);
 
-  if (millis() - lastOscSendMillis >= OSC_SEND_INTERVAL_MS) {
+  if (oscTick()) {
     osc.sendCtrlEnergy(energy);
-    lastOscSendMillis = millis();
   }
 
   if (energy <= 0) {
@@ -245,11 +264,11 @@ void updateDecay() {
   }
 }
 
-void maybeSendThrottled() {
-  if (millis() - lastOscSendMillis < OSC_SEND_INTERVAL_MS) return;
-  osc.sendChargeLevel(level);
-  osc.sendCtrlCharge(level);
+// 30Hz スロットルの単一ゲート。true を返したフレームだけ OSC 連続ストリームを送出する
+boolean oscTick() {
+  if (millis() - lastOscSendMillis < OSC_SEND_INTERVAL_MS) return false;
   lastOscSendMillis = millis();
+  return true;
 }
 
 float easeOutQuad(float t) {
@@ -257,6 +276,9 @@ float easeOutQuad(float t) {
 }
 
 // ---- 入力ハンドラ ----
+
+float normX() { return mouseX / (float) width; }
+float normY() { return mouseY / (float) height; }
 
 void mousePressed() {
   if (state == STATE_IDLE || state == STATE_DECAY) {
@@ -266,9 +288,7 @@ void mousePressed() {
     dragBoost = 0;
     lastOscSendMillis = 0; // 直後の送信を許可
 
-    float nx = mouseX / (float) width;
-    float ny = mouseY / (float) height;
-    osc.sendChargeStart(nx, ny);
+    osc.sendChargeStart(normX(), normY());
   }
 }
 
@@ -282,8 +302,8 @@ void mouseReleased() {
   if (state != STATE_CHARGING) return;
 
   long heldMs = millis() - chargeStartMillis;
-  float nx = mouseX / (float) width;
-  float ny = mouseY / (float) height;
+  float nx = normX();
+  float ny = normY();
 
   if (heldMs < POP_THRESHOLD_MS) {
     triggerPop(mouseX, mouseY, nx, ny);
@@ -359,6 +379,11 @@ void updateShake() {
 
 void oscEvent(OscMessage msg) {
   osc.handleIncoming(msg);
+}
+
+// スケッチ終了時（ESC・ウィンドウクローズ）に UDP ポートを即時解放する
+void dispose() {
+  if (osc != null) osc.close();
 }
 
 // ---- デバッグ HUD ----
