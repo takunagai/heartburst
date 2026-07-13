@@ -36,6 +36,11 @@ import {
   SHAKE_DECAY,
   FLASH_DECAY,
   VIGNETTE_MAX_ALPHA,
+  PARTICLE_COUNT_LEVELS,
+  FPS_SAMPLE_FRAMES,
+  FPS_REDUCE_THRESHOLD,
+  FPS_JITTER_CV_THRESHOLD,
+  FRAME_TIME_OUTLIER_MS,
 } from "./tuning";
 import { Particle, Shockwave, buildVignette } from "./visuals";
 import type { SimState } from "./visuals";
@@ -44,6 +49,9 @@ import { createAudioEngine } from "./audio/engine";
 const audio = createAudioEngine();
 // チューニング・検証用に露出（本番でも害はない読み取り専用ハンドル）
 (window as unknown as { __catharsisAudio: unknown }).__catharsisAudio = audio;
+
+// AGPLv3（web/LICENSE）ソース公開の表記。リポジトリ URL は Phase 5 の公開時に確定
+console.info("CatharsisField ─ licensed under AGPLv3. source: TBD");
 
 // ---- 状態機械（CatharsisField.pde の STATE_* に対応）----
 
@@ -87,6 +95,11 @@ let isPointerDown = false;
 
 // ---- デバッグ HUD ----
 let showHud = false;
+
+// ---- 粒子数の自動調整（起動後 FPS_SAMPLE_FRAMES フレームの実測 fps で判定）----
+let particleLevelIndex = 0;
+let perfFrameTimes: number[] = [];
+let isMeasuringPerf = true;
 
 function easeOutQuad(t: number): number {
   return 1 - (1 - t) * (1 - t);
@@ -140,6 +153,64 @@ function updateShake(p: p5): void {
   }
 }
 
+// ---- 粒子数の自動調整 ----
+//
+// p.deltaTime（前フレームからの経過 ms）を FPS_SAMPLE_FRAMES 個貯め、
+// 平均 fps としきい値を比較する。しきい値未満でも「間隔が一定」なら
+// 省エネモード等による rAF 制限とみなし間引かない（変動係数で判定）。
+// 実際に重いと判定した場合のみ PARTICLE_COUNT_LEVELS の次段へ配列を
+// 切り詰め、まだ下段が残っていれば次の FPS_SAMPLE_FRAMES で再評価する。
+function updatePerfAutoScale(p: p5): void {
+  if (!isMeasuringPerf) return;
+
+  // 最初のフレームは millis() 起点のブレが大きいので計測対象から除外
+  if (p.frameCount <= 1) return;
+
+  const dt = p.deltaTime;
+  if (dt > FRAME_TIME_OUTLIER_MS) {
+    // タブ切り替え復帰等の外れ値混入。実際の重さと無関係なので今回の計測は打ち切る
+    isMeasuringPerf = false;
+    return;
+  }
+
+  perfFrameTimes.push(dt);
+  if (perfFrameTimes.length < FPS_SAMPLE_FRAMES) return;
+
+  const mean = perfFrameTimes.reduce((sum, v) => sum + v, 0) / perfFrameTimes.length;
+  const variance = perfFrameTimes.reduce((sum, v) => sum + (v - mean) ** 2, 0) / perfFrameTimes.length;
+  const coefficientOfVariation = mean > 0 ? Math.sqrt(variance) / mean : 0;
+  const meanFps = mean > 0 ? 1000 / mean : 60;
+
+  perfFrameTimes = [];
+
+  if (meanFps >= FPS_REDUCE_THRESHOLD) {
+    isMeasuringPerf = false; // 十分な fps ─ 以後の計測は不要
+    return;
+  }
+
+  if (coefficientOfVariation < FPS_JITTER_CV_THRESHOLD) {
+    isMeasuringPerf = false; // 間隔が一定 ─ rAF 自体の周波数制限とみなし間引かない
+    return;
+  }
+
+  const nextIndex = particleLevelIndex + 1;
+  if (nextIndex >= PARTICLE_COUNT_LEVELS.length) {
+    isMeasuringPerf = false; // 最下段まで到達済み
+    return;
+  }
+
+  particleLevelIndex = nextIndex;
+  particles.length = PARTICLE_COUNT_LEVELS[nextIndex]; // 削減のみ。切り詰めるだけでよい
+  console.info(
+    `[perf] fps=${meanFps.toFixed(1)} cv=${coefficientOfVariation.toFixed(2)} → 粒子数を ${PARTICLE_COUNT_LEVELS[nextIndex]} に削減`,
+  );
+
+  if (nextIndex >= PARTICLE_COUNT_LEVELS.length - 1) {
+    isMeasuringPerf = false; // これ以上削減できないので打ち切り
+  }
+  // まだ下段があれば isMeasuringPerf は true のまま次の FPS_SAMPLE_FRAMES で再評価する
+}
+
 // ---- 演出トリガー ----
 
 function triggerRelease(p: p5, px: number, py: number, releaseLevel: number, nx: number, ny: number): void {
@@ -159,11 +230,13 @@ function triggerRelease(p: p5, px: number, py: number, releaseLevel: number, nx:
 }
 
 function triggerPop(px: number, py: number, nx: number, ny: number): void {
+  // particles.length を使う（PARTICLE_COUNT 固定値ではない）─
+  // 自動調整で配列が切り詰められた後も範囲外アクセスにならないように
   for (let i = 0; i < POP_SPARK_COUNT; i++) {
-    const idx = (popSparkCursor + i) % PARTICLE_COUNT;
+    const idx = (popSparkCursor + i) % particles.length;
     particles[idx].popSpark(px, py);
   }
-  popSparkCursor = (popSparkCursor + POP_SPARK_COUNT) % PARTICLE_COUNT;
+  popSparkCursor = (popSparkCursor + POP_SPARK_COUNT) % particles.length;
 
   audio.pop(nx, ny);
 }
@@ -258,6 +331,7 @@ function drawHud(p: p5): void {
   p.text(`fps: ${p.frameRate().toFixed(1)}`, 12, 20);
   p.text(`state: ${state}`, 12, 38);
   p.text(`level: ${level.toFixed(2)}  energy: ${energy.toFixed(2)}`, 12, 56);
+  p.text(`particles: ${particles.length}`, 12, 74);
 }
 
 // ---- p5 インスタンスモード スケッチ本体 ----
@@ -313,6 +387,7 @@ const sketch = (p: p5) => {
   };
 
   p.draw = () => {
+    updatePerfAutoScale(p);
     updateState(p);
     updateShake(p);
 

@@ -56,3 +56,18 @@ export const DECAY_SPEED_REF = 6.0; // DECAY_SPEED_REF ─ decay 中、この速
 
 export const VIGNETTE_INNER = 0.35; // VIGNETTE_INNER ─ このデフォルト距離比から暗さが始まる
 export const VIGNETTE_MAX_ALPHA = 200; // VIGNETTE_MAX_ALPHA ─ level=1 のときのヴィネット最大不透明度（RGB colorMode の 0-255 レンジで使用）
+
+// ------------------------------------------------------------
+// 粒子数の自動調整（Phase 4）
+//
+// 起動後 FPS_SAMPLE_FRAMES フレームの実測 deltaTime から fps を求め、
+// しきい値未満なら段階的に間引く（増加はしない・配列を切り詰めるだけ）。
+// ただし「フレーム間隔が均一なまま低fps」は macOS 省エネモード等による
+// rAF 自体の周波数制限であって重さではないため、間引かない
+// （変動係数 = 標準偏差 / 平均 で判定。低ければ「制限」、高ければ「重い」）。
+// ------------------------------------------------------------
+export const PARTICLE_COUNT_LEVELS = [PARTICLE_COUNT, 2500, 1500] as const; // 先頭は PARTICLE_COUNT と同値
+export const FPS_SAMPLE_FRAMES = 120; // 判定に使うフレーム数
+export const FPS_REDUCE_THRESHOLD = 50; // 実測 fps がこれを下回ったら削減候補
+export const FPS_JITTER_CV_THRESHOLD = 0.15; // 変動係数がこれを超えたら「重い」と判定（下回れば rAF 制限とみなし削減しない）
+export const FRAME_TIME_OUTLIER_MS = 300; // タブ非アクティブ復帰等の外れ値。混入した計測ウィンドウは破棄する
