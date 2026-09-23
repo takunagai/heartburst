@@ -230,7 +230,8 @@ let isResidueFading = false;
 
 // 言葉
 const WORD_MAX_LENGTH = 16;
-const WORD_PARTICLE_RATIO = 0.5; // 全粒子のうち言葉に使う割合
+const WORD_PARTICLE_RATIO = 0.5; // 全粒子のうち言葉に使う割合の上限
+const WORD_PARTICLE_MAX = 2600; // 言葉に使う粒子数の上限（多すぎると文字が白く潰れる）
 
 // 背景色の HSB 分解（起動時 1 回）
 let bgHue = 0;
@@ -1116,7 +1117,7 @@ function formWord(word: string): void {
   c.fillStyle = "#fff";
   c.fillText(word, w / 2, h * 0.44);
 
-  const target = Math.floor(particles.length * WORD_PARTICLE_RATIO);
+  const target = Math.min(Math.floor(particles.length * WORD_PARTICLE_RATIO), WORD_PARTICLE_MAX);
   const data = c.getImageData(0, 0, w, h).data;
   let points: { x: number; y: number }[] = [];
   for (let step = 4; step >= 2; step--) {
@@ -1355,6 +1356,7 @@ const sketch = (p: p5) => {
     bgSat = p.saturation(bg);
     bgBri = p.brightness(bg);
 
+    Particle.setDomain(p.width, p.height); // 粒子の住む真円（生成前に確定させる）
     particles = Array.from({ length: PARTICLE_COUNT }, () => new Particle(p));
     shockwaves = Array.from({ length: MAX_SHOCKWAVES }, () => new Shockwave(p));
 
@@ -1403,6 +1405,7 @@ const sketch = (p: p5) => {
       zoom,
       flashAlpha,
       particles: particles.length,
+      onscreen: particles.filter((particle) => !particle.isOffscreen(window.innerWidth, window.innerHeight)).length,
       drawMs: drawMsAverage,
       tier: currentTier,
       scene: currentScene().name,
@@ -1421,6 +1424,7 @@ const sketch = (p: p5) => {
 
   p.windowResized = () => {
     p.resizeCanvas(window.innerWidth, window.innerHeight);
+    Particle.setDomain(p.width, p.height); // 円の外に出た粒子は次のフレームで円内へ戻る
     vignetteImg = buildVignette(p, p.width, p.height);
     resizeGlowLayer();
     resizeResidueLayer();

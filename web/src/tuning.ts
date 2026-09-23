@@ -7,7 +7,7 @@
 // フレームレート非依存化はせず main.ts 側で frameRate(60) を明示する）。
 // ============================================================
 
-export const PARTICLE_COUNT = 4000; // PARTICLE_COUNT
+export const PARTICLE_COUNT = 8000; // 粒子は画面より大きい真円に住むため、画面内の密度を保つよう旧 4000 から倍増（画面外は描画を省く）
 export const POP_SPARK_COUNT = 20; // POP_SPARK_COUNT
 export const MAX_SHOCKWAVES = 16; // 解放 1 回で 3〜6 本（先行波・本波・残響波 + 特殊）+ 段階チャージの輪
 
@@ -84,9 +84,13 @@ export const STREAK_MIN_SPEED = 1.6; // これ未満は点として描く
 export const STREAK_LENGTH_PER_SPEED = 1.5; // 線の長さ = 速度 × この値
 export const STREAK_MAX_LENGTH = 70;
 
-// 画面外への飛散と再流入（爆発中は端ワープしない）
-export const EDGE_ESCAPE_MARGIN = 40; // 画面外判定の余白
-export const EDGE_RESPAWN_SPEED = 1.2; // 画面外でこの速度未満になったら端から再流入させる
+// 粒子が住む範囲: 画面中心の真円（矩形だと溜めで画面の四辺がそのまま縮んで見えるため）
+export const DOMAIN_RADIUS_SCALE = 1.4; // 半径 = 画面の対角線の半分 × この値
+export const DOMAIN_RADIAL_EXPONENT = 0.7; // 配置の半径 = R × 乱数^この値（0.5 で一様、大きいほど中心が濃い）
+export const DOMAIN_CENTER_PULL = 0.15; // idle 中、円の縁でこの速さ（px/frame）だけ中心へ寄せる（中心の濃さを保つ）
+export const DOMAIN_ESCAPE_MARGIN = 40; // 爆発後、円の外へこれ以上出た粒子を再流入の対象にする
+export const EDGE_RESPAWN_SPEED = 1.2; // 円の外でこの速度未満になったら円周から再流入させる
+export const OFFSCREEN_CULL_MARGIN = 80; // 画面外のこの余白より外の粒子は描画しない（ストリークの最大長 + α）
 
 // 衝撃波の歪み（通過した粒子を外へ押す）
 export const SHOCKWAVE_PUSH_BAND = 60; // 波面からこの距離以内の粒子を押す
@@ -139,7 +143,7 @@ export const SHAKE_RELEASE_ACCEL = 17; // スマホを振って解放する加�
 // rAF 自体の周波数制限であって重さではないため、間引かない
 // （変動係数 = 標準偏差 / 平均 で判定。低ければ「制限」、高ければ「重い」）。
 // ------------------------------------------------------------
-export const PARTICLE_COUNT_LEVELS = [PARTICLE_COUNT, 2500, 1500] as const; // 先頭は PARTICLE_COUNT と同値
+export const PARTICLE_COUNT_LEVELS = [PARTICLE_COUNT, 5000, 3000] as const; // 先頭は PARTICLE_COUNT と同値
 export const FPS_SAMPLE_FRAMES = 120; // 判定に使うフレーム数
 export const FPS_REDUCE_THRESHOLD = 50; // 実測 fps がこれを下回ったら削減候補
 export const FPS_JITTER_CV_THRESHOLD = 0.15; // 変動係数がこれを超えたら「重い」と判定（下回れば rAF 制限とみなし削減しない）

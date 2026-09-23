@@ -14,6 +14,9 @@
 // Phase 9-4:
 //   - 場面ごとの配色（粒子は 2 色の間の個体差 paletteT で色相を決める）
 //   - 言葉を形作る粒子（目標座標へばねで寄り、溜めで震え、着弾で砕ける）
+// 粒子の住む範囲は画面中心の真円（半径 = 対角線の半分 × DOMAIN_RADIUS_SCALE）。
+// 画面の矩形に閉じ込めると、溜めで画面の四辺がそのまま縮む直線の縁が見えるため。
+// 画面外の粒子は計算だけして描画を省く。
 // ============================================================
 
 import type p5 from "p5";
@@ -36,8 +39,12 @@ import {
   STREAK_MIN_SPEED,
   STREAK_LENGTH_PER_SPEED,
   STREAK_MAX_LENGTH,
-  EDGE_ESCAPE_MARGIN,
   EDGE_RESPAWN_SPEED,
+  DOMAIN_RADIUS_SCALE,
+  DOMAIN_RADIAL_EXPONENT,
+  DOMAIN_CENTER_PULL,
+  DOMAIN_ESCAPE_MARGIN,
+  OFFSCREEN_CULL_MARGIN,
   SHOCKWAVE_PUSH_BAND,
   SHOCKWAVE_PUSH_FORCE,
   SHOCKWAVE_ECHO_DELAY_FRAMES,
@@ -173,42 +180,37 @@ export class Particle {
     this.spectrumOffset = (Math.random() - 0.5) * BURST_HUE_SPREAD;
   }
 
+  // 住む範囲（全粒子で共有。main が起動時とリサイズ時に setDomain で更新）
+  static domain = { cx: 0, cy: 0, radius: 1 };
+
+  static setDomain(width: number, height: number): void {
+    Particle.domain = {
+      cx: width / 2,
+      cy: height / 2,
+      radius: (Math.hypot(width, height) / 2) * DOMAIN_RADIUS_SCALE,
+    };
+  }
+
+  // 円の中に配置。半径を 乱数^指数 で取り、中心ほど濃くする（画面外に粒子を散らしすぎない）
   respawnRandom(): void {
-    this.x = this.p.random(this.p.width);
-    this.y = this.p.random(this.p.height);
+    const { cx, cy, radius } = Particle.domain;
+    const angle = Math.random() * TWO_PI;
+    const r = radius * Math.pow(Math.random(), DOMAIN_RADIAL_EXPONENT);
+    this.x = cx + Math.cos(angle) * r;
+    this.y = cy + Math.sin(angle) * r;
     this.vx = 0;
     this.vy = 0;
   }
 
-  // 画面外へ飛び去った粒子を、ランダムな辺のすぐ外側から内向きに再流入させる
-  private respawnAtEdge(w: number, h: number): void {
+  // 円の外へ飛び去った粒子を、円周のランダムな位置から内向きに再流入させる（円周は画面外）
+  private respawnOnRim(): void {
+    const { cx, cy, radius } = Particle.domain;
+    const angle = Math.random() * TWO_PI;
     const inward = this.p.random(0.6, 1.6);
-    switch (Math.floor(Math.random() * 4)) {
-      case 0:
-        this.x = this.p.random(w);
-        this.y = -8;
-        this.vx = 0;
-        this.vy = inward;
-        break;
-      case 1:
-        this.x = w + 8;
-        this.y = this.p.random(h);
-        this.vx = -inward;
-        this.vy = 0;
-        break;
-      case 2:
-        this.x = this.p.random(w);
-        this.y = h + 8;
-        this.vx = 0;
-        this.vy = -inward;
-        break;
-      default:
-        this.x = -8;
-        this.y = this.p.random(h);
-        this.vx = inward;
-        this.vy = 0;
-        break;
-    }
+    this.x = cx + Math.cos(angle) * radius * 0.98;
+    this.y = cy + Math.sin(angle) * radius * 0.98;
+    this.vx = -Math.cos(angle) * inward;
+    this.vy = -Math.sin(angle) * inward;
   }
 
   // pop（小破裂）用: 既存粒子を指定座標へワープさせ、放射状の初速を与える
@@ -248,19 +250,24 @@ export class Particle {
       return;
     }
     switch (f.state) {
-      case "idle":
+      case "idle": {
         this.flowDrift(1.0, 1.0);
         this.hoverRepel(f);
+        // 縁ほど中心へ寄せる弱い流れ（フローで外へ散っても中心の濃さを保つ）
+        const { cx, cy, radius } = Particle.domain;
+        this.vx -= ((this.x - cx) / radius) * DOMAIN_CENTER_PULL * 0.06;
+        this.vy -= ((this.y - cy) / radius) * DOMAIN_CENTER_PULL * 0.06;
         this.x += this.vx;
         this.y += this.vy;
-        this.wrapEdges(f.width, f.height);
+        this.wrapDisk();
         return;
+      }
       case "charging":
       case "inhale":
         this.chargingPull(f);
         this.x += this.vx;
         this.y += this.vy;
-        this.wrapEdges(f.width, f.height);
+        this.wrapDisk();
         return;
       case "impact":
         return; // ヒットストップ ─ 静止
@@ -271,7 +278,7 @@ export class Particle {
         this.hoverRepel(f);
         this.x += this.vx * f.timeScale;
         this.y += this.vy * f.timeScale;
-        this.escapeEdges(f.width, f.height);
+        this.escapeDisk();
         return;
     }
   }
@@ -362,22 +369,38 @@ export class Particle {
     this.vy *= CHARGE_DAMPING;
   }
 
-  // 反対側へのワープ。大きく画面外にいる粒子（飛散の生き残り）も 1 回で画面内へ戻す
-  private wrapEdges(w: number, h: number): void {
-    if (this.x < 0 || this.x > w) this.x = ((this.x % w) + w) % w;
-    if (this.y < 0 || this.y > h) this.y = ((this.y % h) + h) % h;
+  // 円の外へ出たら、中心を挟んだ反対側の円周の内側へ移す（円周は画面外なので見えない）。
+  // 大きく外にいる粒子（飛散の生き残り）も 1 回で円内へ戻る
+  private wrapDisk(): void {
+    const { cx, cy, radius } = Particle.domain;
+    const dx = this.x - cx;
+    const dy = this.y - cy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= radius * radius) return;
+    const d = Math.sqrt(d2);
+    this.x = cx - (dx / d) * radius * 0.98;
+    this.y = cy - (dy / d) * radius * 0.98;
   }
 
-  // decay 中: ワープせず飛び去らせ、十分減速したら端から再流入
-  private escapeEdges(w: number, h: number): void {
-    const m = EDGE_ESCAPE_MARGIN;
-    const isOutside = this.x < -m || this.x > w + m || this.y < -m || this.y > h + m;
-    if (isOutside && Math.hypot(this.vx, this.vy) < EDGE_RESPAWN_SPEED) {
-      this.respawnAtEdge(w, h);
+  // decay 中: ワープせず飛び去らせ、円の外で十分減速したら円周から再流入
+  private escapeDisk(): void {
+    const { cx, cy, radius } = Particle.domain;
+    const limit = radius + DOMAIN_ESCAPE_MARGIN;
+    const dx = this.x - cx;
+    const dy = this.y - cy;
+    if (dx * dx + dy * dy > limit * limit && Math.hypot(this.vx, this.vy) < EDGE_RESPAWN_SPEED) {
+      this.respawnOnRim();
     }
   }
 
+  // 画面外（ストリークが届かない範囲）なら描画しない
+  isOffscreen(width: number, height: number): boolean {
+    const m = OFFSCREEN_CULL_MARGIN;
+    return this.x < -m || this.x > width + m || this.y < -m || this.y > height + m;
+  }
+
   display(ctx: CanvasRenderingContext2D, f: FrameParams): void {
+    if (this.isOffscreen(f.width, f.height)) return;
     // alpha / sat / bri は 0..100 レンジ。色相は場面の配色から決める
     const baseHue = lerpHue(f.paletteA, f.paletteB, this.paletteT);
     let hue = baseHue;
