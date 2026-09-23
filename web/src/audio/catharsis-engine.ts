@@ -7,12 +7,23 @@
 //   - 着弾の量子化: 強い解放は Strudel の次の 16 分へ揃える
 //   - 着弾音の多層化: 小型スピーカーでも聞こえる帯域（クリック・胴・倍音）を重ねる
 //   - ドロップ区間: 着弾後 1〜2 小節、拍に揃ったキック + ベース + Strudel 層のポンピング
+// Phase 9-3:
+//   - 和声: 解放のたびにコード進行（Cm → A♭ → E♭ → B♭）。シャワー・ベース・Strudel 層が追従
+//   - タップの音程（位置で決まる）と、種のループシーケンサー（1 小節 16 分割）・連鎖爆発の音
 // Phase 9-2:
 //   - 段階チャージの和音、オーバーチャージの Shepard トーン + 放電ノイズ
 //   - 心拍の位相の公開（クリティカル判定用）、爆発の種類別レイヤー（金の鐘 / 暴発のクラッシュ）
 
-import type { AudioEngine, BurstStyle, ReleaseParams, ReleaseTiming } from "./engine";
+import type { AudioEngine, BurstStyle, ReleaseParams, ReleaseTiming, SeedNote } from "./engine";
 import type { StrudelClock } from "./pattern";
+import {
+  CHORD_PROGRESSION,
+  SHOWER_MIDIS,
+  TAP_MIDIS,
+  chordShowerMidis,
+  midicps,
+} from "../music";
+import type { Chord } from "../music";
 
 // ---- チューニング定数 ----
 const MASTER_VOLUME = 0.9;   // ~masterVolume
@@ -36,17 +47,19 @@ const SHEPARD_CENTER_OCT = 3.6;  // 音量ピークの位置（基準からの�
 const SHEPARD_SIGMA_OCT = 1.3;   // 音量の山の幅
 
 // ペンタトニック（C マイナーペンタ = 0,3,5,7,10）─ sc/main.scd と同一
-const PENTA = [0, 3, 5, 7, 10];
-const midicps = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
-const SHIMMER_FREQS = [72, 84].flatMap((b) => PENTA.map((d) => midicps(b + d)));
-const POP_FREQS = [60, 72].flatMap((b) => PENTA.map((d) => midicps(b + d)));
+const SHOWER_DECAY = 2.2; // 残響シャワー・和音のプラック減衰
+const TAP_DECAY = 0.28;   // タップ音
+const SEED_DECAY = 0.7;   // 種のループ音（少し長く歌わせる）
+const SEQ_LOOKAHEAD_SEC = 0.12;
+const SEQ_STEPS = 16;     // 1 小節 = 16 分 × 16
 const DROP_BASS_STEPS = [0, 0, 12, 0, 3, 0, -2, -5]; // 8 分ごとの C2 からの半音差（裏拍で鳴らす）
-// 段階チャージの和音（SHIMMER_FREQS のバンク内の音。段階ごとに 1 段上へ）
+// 段階チャージの和音（SHOWER_MIDIS のバンク内の音。段階ごとに 1 段上へ）
 const TIER_CHORDS = [
   [72, 75, 79],
   [75, 79, 82],
   [79, 84, 87, 91],
-].map((chord) => chord.map(midicps));
+];
+
 
 const choose = <T,>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
 const linlin = (x: number, a: number, b: number, c: number, d: number) =>
@@ -70,6 +83,10 @@ export class CatharsisAudioEngine implements AudioEngine {
   private exciterCurve!: Float32Array<ArrayBuffer>; // 非対称の歪み（偶数倍音 ─ 小型スピーカーで低音を「聞かせる」）
 
   private clock: StrudelClock | null = null;
+  private chordIndex = 0;
+  private seeds: SeedNote[] = [];
+  private nextSeqTime = 0;
+  private setPatternChord: ((chord: Chord) => void) | null = null;
   private fallbackOrigin = 0;
 
   // 溜め中のライブノード（ドローン + ライザー + スネアロール）
@@ -147,10 +164,15 @@ export class CatharsisAudioEngine implements AudioEngine {
     this.buildPluckBank(); // KS プラック 20 音をオフライン合成（数十 ms・ゲート直後なので許容）
 
     // ---- パターン層（Strudel・オプショナル）─ 失敗しても本体は動く ----
-    const { startPatternLayer } = await import("./pattern");
-    void startPatternLayer(this.ctx, this.strudelPump).then((clock) => {
+    const pattern = await import("./pattern");
+    void pattern.startPatternLayer(this.ctx, this.strudelPump, this.chord).then((clock) => {
       this.clock = clock;
+      if (clock) this.setPatternChord = pattern.setPatternChord;
     });
+
+    // 種のシーケンサー（常時。種が無ければ何もしない）
+    this.nextSeqTime = this.ctx.currentTime;
+    window.setInterval(() => this.scheduleSeeds(), ROLL_TIMER_MS);
   }
 
   // ============ 拍グリッド（Strudel スケジューラと同じ時間軸） ============
@@ -354,8 +376,8 @@ export class CatharsisAudioEngine implements AudioEngine {
   tierUp(tier: number): void {
     if (!this.ctx) return;
     const chord = TIER_CHORDS[Math.min(Math.max(tier, 1), TIER_CHORDS.length) - 1];
-    chord.forEach((freq, i) => {
-      this.pluck(freq, 0.18 + tier * 0.03, (i / (chord.length - 1)) * 1.2 - 0.6, 2.2, this.ctx.currentTime + i * 0.025);
+    chord.forEach((midi, i) => {
+      this.pluck(midi, 0.18 + tier * 0.03, (i / (chord.length - 1)) * 1.2 - 0.6, SHOWER_DECAY, this.ctx.currentTime + i * 0.025);
     });
     const t = this.ctx.currentTime;
     this.kick(t, 0.22 + tier * 0.08, this.dryIn);
@@ -441,6 +463,8 @@ export class CatharsisAudioEngine implements AudioEngine {
     this.stopDrone(CHARGE_CUT_SEC);
 
     const isBig = l >= QUANTIZE_MIN_LEVEL;
+    // 強い解放ごとにコードが進む（無音の間に切り替わり、ドロップは新しいコードで始まる）
+    if (isBig) this.advanceChord();
     let impact = now + linlin(l, 0, 1, INHALE_SEC_MIN, INHALE_SEC_MAX);
     if (isBig) impact = this.nextGridTime(impact, 16);
 
@@ -543,7 +567,7 @@ export class CatharsisAudioEngine implements AudioEngine {
       osc.stop(t + 3.2);
       osc.connect(this.envelope(t, 0.2 / (i + 1), 0.002, 2.8 / (1 + i * 0.6))).connect(panner);
     });
-    [96, 99, 103].forEach((m, i) => this.pluck(midicps(m - 12), 0.14, (i - 1) * 0.7, 2.2, t + 0.06 + i * 0.05));
+    [84, 87, 91].forEach((m, i) => this.pluck(m, 0.14, (i - 1) * 0.7, SHOWER_DECAY, t + 0.06 + i * 0.05));
   }
 
   // 暴発: 長いクラッシュ + 追加の超低域 + 歪んだ下降音（制御を失った感じ）
@@ -593,6 +617,7 @@ export class CatharsisAudioEngine implements AudioEngine {
     this.dropBus = bus;
     const end = impact + lengthSec;
     const kickAmp = linlin(level, 0, 1, 0.45, 0.7);
+    const chord = this.chord;
 
     const pump = this.strudelPump.gain;
     pump.cancelScheduledValues(impact);
@@ -605,7 +630,8 @@ export class CatharsisAudioEngine implements AudioEngine {
     for (const { time, index } of this.gridTimes(impact + 0.02, end, 8)) {
       if (index % 2 === 0) continue; // 裏拍だけ
       const step = DROP_BASS_STEPS[Math.floor(index / 2) % DROP_BASS_STEPS.length];
-      this.bassNote(time, midicps(36 + step), linlin(level, 0, 1, 0.14, 0.24), bus);
+      const root = chord.root > 6 ? chord.root - 12 : chord.root; // ベースは C2 付近に収める
+      this.bassNote(time, midicps(36 + root + step), linlin(level, 0, 1, 0.14, 0.24), bus);
     }
     // 区間の最後は 1 小節の半分で自然に抜ける（次の溜めが来なければ Strudel 層の余韻へ）
     bus.gain.setValueAtTime(1, end - 0.05);
@@ -659,6 +685,7 @@ export class CatharsisAudioEngine implements AudioEngine {
 
   // シャワー: 密度 ∝ level から 3 秒で減衰（sc/main.scd の Routine と同ロジック）
   private shimmerShower(level: number): void {
+    const showerMidis = chordShowerMidis(this.chord); // 着弾時点のコードの構成音で降らせる
     const total = 3.0;
     const baseDensity = linlin(level, 0, 1, 3, 14);
     let elapsed = 0;
@@ -667,7 +694,7 @@ export class CatharsisAudioEngine implements AudioEngine {
       const frac = 1 - elapsed / total;
       const density = Math.max(baseDensity * frac, 0.8);
       const amp = linlin(level, 0, 1, 0.08, 0.22) * Math.max(frac, 0.25);
-      this.pluck(choose(SHIMMER_FREQS), amp, Math.random() * 2 - 1, 2.2);
+      this.pluck(choose(showerMidis), amp, Math.random() * 2 - 1, SHOWER_DECAY);
       const wait = 1 / density;
       elapsed += wait;
       window.setTimeout(tick, wait * 1000);
@@ -692,15 +719,80 @@ export class CatharsisAudioEngine implements AudioEngine {
       this.noiseHit(t, "bandpass", 900, 0.7, 0.25 * intensity, 0.18, panner);
       this.kick(t, 0.18 * intensity, this.dryIn);
     } else {
-      const upper = SHIMMER_FREQS.slice(SHIMMER_FREQS.length / 2);
-      this.pluck(choose(upper), (style === "critical" ? 0.16 : 0.1) * intensity, pan, 2.2, t + 0.01);
-      if (style === "critical") this.pluck(choose(upper), 0.1 * intensity, -pan, 2.2, t + 0.07);
+      const upper = chordShowerMidis(this.chord).filter((m) => m >= 79);
+      this.pluck(choose(upper), (style === "critical" ? 0.16 : 0.1) * intensity, pan, SHOWER_DECAY, t + 0.01);
+      if (style === "critical") this.pluck(choose(upper), 0.1 * intensity, -pan, SHOWER_DECAY, t + 0.07);
     }
   }
 
-  pop(x: number, _y: number): void {
+  // タップ: 位置で決まる音程（main が music.tapToMidi で算出して渡す）
+  pop(x: number, _y: number, midi: number): void {
     if (!this.ctx) return;
-    this.pluck(choose(POP_FREQS), 0.4, (x * 2 - 1) * 0.6, 0.28);
+    this.pluck(midi, 0.4, (x * 2 - 1) * 0.6, TAP_DECAY);
+  }
+
+  // ============ 和声・種のシーケンサー・連鎖爆発 ============
+
+  private get chord(): Chord {
+    return CHORD_PROGRESSION[this.chordIndex % CHORD_PROGRESSION.length];
+  }
+
+  getChordIndex(): number {
+    return this.chordIndex;
+  }
+
+  private advanceChord(): void {
+    this.chordIndex = (this.chordIndex + 1) % CHORD_PROGRESSION.length;
+    this.setPatternChord?.(this.chord);
+  }
+
+  setSeeds(seeds: SeedNote[]): void {
+    this.seeds = seeds.slice();
+  }
+
+  // 小節内の位置 0..1（出力レイテンシ分を差し引いた「いま聞こえている」位置 ─ 種の光を音に合わせる）
+  getBarPhase(): number {
+    if (!this.ctx) return 0;
+    const { cps, n0, s0 } = this.gridParams();
+    const heard = this.ctx.currentTime - (this.ctx.outputLatency || this.ctx.baseLatency || 0);
+    const cycle = (heard - s0) * cps + n0;
+    return ((cycle % 1) + 1) % 1;
+  }
+
+  // 種を植えた瞬間に最も近い 16 分の位置
+  getNearestSlot(): number {
+    return Math.round(this.getBarPhase() * SEQ_STEPS) % SEQ_STEPS;
+  }
+
+  private scheduleSeeds(): void {
+    const now = this.ctx.currentTime;
+    const horizon = now + SEQ_LOOKAHEAD_SEC;
+    const from = Math.max(this.nextSeqTime, now + 0.005);
+    if (this.seeds.length > 0) {
+      for (const { time, index } of this.gridTimes(from, horizon, SEQ_STEPS)) {
+        const slot = ((index % SEQ_STEPS) + SEQ_STEPS) % SEQ_STEPS;
+        for (const seed of this.seeds) {
+          if (seed.slot === slot) this.pluck(seed.midi, 0.22, seed.pan, SEED_DECAY, time);
+        }
+      }
+    }
+    this.nextSeqTime = horizon;
+  }
+
+  // 種の誘爆: その種の音を強く + パチパチ。連鎖が進むほど明るく（少し大きく）
+  seedBurst(midi: number, pan: number, chainIndex: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const amp = Math.min(0.28 + chainIndex * 0.03, 0.5);
+    this.pluck(midi, amp, pan, SEED_DECAY, t);
+    const octaveUp = midi + 12;
+    if (TAP_MIDIS.includes(octaveUp)) this.pluck(octaveUp, amp * 0.5, -pan * 0.5, SEED_DECAY, t + 0.03);
+    const panner = this.ctx.createStereoPanner();
+    panner.pan.value = pan;
+    panner.connect(this.fxIn);
+    for (let i = 0; i < 4; i++) {
+      this.noiseHit(t + Math.random() * 0.06, "highpass", 4000 + Math.random() * 4000, 0.8, 0.07, 0.015, panner);
+    }
   }
 
   // Karplus-Strong プラック（\shimmer / \popPluck の写像）
@@ -711,13 +803,16 @@ export class CatharsisAudioEngine implements AudioEngine {
   // AudioBuffer バンクとして保持 → 発音は再生のみ（音程正確・再生コスト極小）
   private pluckBank = new Map<string, AudioBuffer>();
 
-  private pluckKey(freq: number, decaySec: number): string {
-    return `${freq.toFixed(2)}:${decaySec}`;
+  private pluckKey(midi: number, decaySec: number): string {
+    return `${midi}:${decaySec}`;
   }
 
   private buildPluckBank(): void {
-    for (const f of SHIMMER_FREQS) this.pluckBank.set(this.pluckKey(f, 2.2), this.renderKarplusStrong(f, 2.2));
-    for (const f of POP_FREQS) this.pluckBank.set(this.pluckKey(f, 0.28), this.renderKarplusStrong(f, 0.28));
+    for (const m of SHOWER_MIDIS) this.pluckBank.set(this.pluckKey(m, SHOWER_DECAY), this.renderKarplusStrong(midicps(m), SHOWER_DECAY));
+    for (const m of TAP_MIDIS) {
+      this.pluckBank.set(this.pluckKey(m, TAP_DECAY), this.renderKarplusStrong(midicps(m), TAP_DECAY));
+      this.pluckBank.set(this.pluckKey(m, SEED_DECAY), this.renderKarplusStrong(midicps(m), SEED_DECAY));
+    }
   }
 
   // 古典 KS: ノイズ 1 周期のリングバッファを「隣接平均 × フィードバック」で巡回
@@ -741,8 +836,8 @@ export class CatharsisAudioEngine implements AudioEngine {
     return buf;
   }
 
-  private pluck(freq: number, amp: number, pan: number, decaySec: number, when?: number): void {
-    const buf = this.pluckBank.get(this.pluckKey(freq, decaySec));
+  private pluck(midi: number, amp: number, pan: number, decaySec: number, when?: number): void {
+    const buf = this.pluckBank.get(this.pluckKey(midi, decaySec));
     if (!buf) return;
     const t = when ?? this.ctx.currentTime;
     const src = this.ctx.createBufferSource();

@@ -5,6 +5,12 @@
 // （?mute の Noop と差し替えるため）。
 // ============================================================
 
+export interface SeedNote {
+  slot: number; // 0..15（1 小節内の 16 分の位置）
+  midi: number;
+  pan: number; // -1..1
+}
+
 // release() の戻り値 ─ ビジュアルを音の着弾に合わせるためのタイミング情報
 export interface ReleaseTiming {
   impactDelaySec: number; // 今から着弾音が「聞こえる」までの秒数（量子化待ち + 出力レイテンシ込み）
@@ -34,7 +40,12 @@ export interface AudioEngine {
   getHeartbeatPhase(): number; // 直近の心拍からの位相 0..1（0 = 鳴った瞬間）
   release(params: ReleaseParams): ReleaseTiming;
   sparkBurst(x: number, intensity: number, style: BurstStyle): void; // 二次爆発（花火の連鎖）
-  pop(x: number, y: number): void;
+  pop(x: number, y: number, midi: number): void; // midi は music.tapToMidi で算出
+  setSeeds(seeds: SeedNote[]): void; // 種のループシーケンサーの内容（変更時に全量を渡す）
+  seedBurst(midi: number, pan: number, chainIndex: number): void; // 種の誘爆音
+  getBarPhase(): number; // 小節内の位置 0..1（聞こえている位置）
+  getNearestSlot(): number; // 今に最も近い 16 分の位置 0..15
+  getChordIndex(): number; // コード進行の位置
   setEnergy(energy: number): void; // decay 中 1→0
   getAmp(): number; // マスター振幅 0..1
 }
@@ -52,6 +63,17 @@ export class NoopAudioEngine implements AudioEngine {
     return { impactDelaySec: 0.04 + 0.1 * params.level, dropSec: 0 };
   }
   sparkBurst(): void {}
+  setSeeds(): void {}
+  seedBurst(): void {}
+  getBarPhase(): number {
+    return (performance.now() % 2400) / 2400;
+  }
+  getNearestSlot(): number {
+    return Math.round(this.getBarPhase() * 16) % 16;
+  }
+  getChordIndex(): number {
+    return 0;
+  }
   pop(): void {}
   setEnergy(): void {}
   getAmp(): number {

@@ -15,6 +15,12 @@
 //   - スリングショット: 離す直前の弾き速度で爆発に向きが付く
 //   - idle の粒子はカーソルを避ける / スマホは振って解放・振動フィードバック
 //
+// Phase 9-3（楽器・音楽）:
+//   - タップは位置で音程が決まり（x = 音階、y = オクターブ）、その場に「種」が残る
+//   - 種は 1 小節ループの 16 分の位置で鳴り続け、星座のように線で結ばれる
+//   - 衝撃波が種に触れると誘爆し、その波がさらに次の種を誘爆する（連鎖。種の音が旋律として鳴る）
+//   - 解放のたびにコードが進み、背景の星雲の色合いもコードに追従する
+//
 // 保持 < 300ms の短クリック/タップは「小破裂（pop）」の軽量パスへ分岐する。
 // マウスとタッチは Pointer Events で同一パスに統合する。
 // ============================================================
@@ -83,6 +89,7 @@ import { Particle, Shockwave, buildVignette } from "./visuals";
 import type { SimState, FrameParams } from "./visuals";
 import { createAudioEngine } from "./audio/engine";
 import type { BurstStyle } from "./audio/engine";
+import { CHORD_PROGRESSION, midiHue, tapToMidi } from "./music";
 
 const audio = createAudioEngine();
 // チューニング・検証用に露出（本番でも害はない読み取り専用ハンドル）
@@ -115,6 +122,25 @@ let releaseDirAmount = 0;
 // ドロップ中の拍の検出（振幅の立ち上がり）→ 爆心から輪を出して画面を拍に乗せる
 let ampSmoothed = 0;
 let lastBeatPulseMillis = 0;
+
+// 種（タップで植える音の星）と連鎖爆発
+interface Seed {
+  x: number;
+  y: number;
+  slot: number; // 1 小節内の 16 分の位置
+  midi: number;
+  hue: number;
+  pan: number;
+  flash: number; // 鳴った瞬間 1 → 減衰
+}
+const seeds: Seed[] = [];
+const MAX_SEEDS = 16;
+const SEED_WAVE_LEVEL = 0.1; // 誘爆した種が出す波の大きさ（届く範囲 ≒ 330px）
+const CHAIN_FINALE_COUNT = 6; // この連鎖数に達すると大輪の締め
+let lastBarPhase = 0;
+let chainCount = 0;
+let chainLabel = { count: 0, x: 0, y: 0, atMillis: Number.NEGATIVE_INFINITY, hue: 0 };
+let chordHueShift = 0;
 
 // 二次爆発（花火の連鎖）: 着弾後、爆心の周りで時間差に弾ける
 interface SecondaryBurst {
@@ -500,7 +526,130 @@ function triggerImpact(now: number): void {
   const hitstopScale = releaseStyle === "overload" ? 1.4 : releaseStyle === "critical" ? 1.25 : 1;
   hitstopEndMillis = now + lerp(HITSTOP_MS_MIN, HITSTOP_MS_MAX, intensity) * hitstopScale;
   state = "impact";
+  chainCount = 0;
   scheduleSecondaryBursts(hitstopEndMillis);
+}
+
+// ---- 種と連鎖 ----
+
+function plantSeed(px: number, py: number, nx: number, midi: number): void {
+  seeds.push({ x: px, y: py, slot: audio.getNearestSlot(), midi, hue: midiHue(midi), pan: nx * 2 - 1, flash: 1 });
+  if (seeds.length > MAX_SEEDS) seeds.shift(); // 古い種から消える
+  syncSeeds();
+}
+
+function syncSeeds(): void {
+  audio.setSeeds(seeds.map((seed) => ({ slot: seed.slot, midi: seed.midi, pan: seed.pan })));
+}
+
+// 本波（main）の波面が種に届いたら誘爆
+function updateSeeds(p: p5): void {
+  // 小節の位置が種のスロットを跨いだら光らせる（音はエンジン側が先読みで鳴らしている）
+  const phase = audio.getBarPhase();
+  for (const seed of seeds) {
+    const slotPhase = seed.slot / 16;
+    const crossed = lastBarPhase <= phase ? slotPhase > lastBarPhase && slotPhase <= phase : slotPhase > lastBarPhase || slotPhase <= phase;
+    if (crossed) seed.flash = 1;
+    seed.flash *= 0.9;
+  }
+  lastBarPhase = phase;
+
+  if (seeds.length === 0) return;
+  for (const wave of shockwaves) {
+    if (!wave.active || wave.kind !== "main" || wave.delayFrames > 0) continue;
+    for (let i = seeds.length - 1; i >= 0; i--) {
+      const seed = seeds[i];
+      if (Math.hypot(seed.x - wave.x, seed.y - wave.y) <= wave.radius) {
+        seeds.splice(i, 1);
+        detonateSeed(p, seed);
+      }
+    }
+  }
+}
+
+function detonateSeed(p: p5, seed: Seed): void {
+  chainCount++;
+  spawnShockwave(seed.x, seed.y, SEED_WAVE_LEVEL, "main", seed.hue, 80);
+  spawnShockwave(seed.x, seed.y, 0.2, "tier", seed.hue, 50);
+  for (let i = 0; i < 50; i++) {
+    const idx = (popSparkCursor + i) % particles.length;
+    particles[idx].popSpark(seed.x, seed.y, 1.7);
+  }
+  popSparkCursor = (popSparkCursor + 50) % particles.length;
+  audio.seedBurst(seed.midi, seed.pan, chainCount);
+  shakeIntensity = Math.max(shakeIntensity, Math.min(3 + chainCount * 0.8, 12));
+  chainLabel = { count: chainCount, x: seed.x, y: seed.y, atMillis: p.millis(), hue: seed.hue };
+  vibrate(15);
+  syncSeeds();
+
+  if (chainCount === CHAIN_FINALE_COUNT) {
+    // 大輪の締め: 連鎖の終点で金の花火を追加で咲かせる
+    const savedStyle = releaseStyle;
+    releaseStyle = "critical";
+    const savedX = releaseX;
+    const savedY = releaseY;
+    releaseX = seed.x;
+    releaseY = seed.y;
+    scheduleSecondaryBursts(p.millis());
+    releaseX = savedX;
+    releaseY = savedY;
+    releaseStyle = savedStyle;
+    flashAlpha = Math.max(flashAlpha, 30);
+    flashHue = CRITICAL_HUE;
+    flashSat = 50;
+  }
+}
+
+function drawSeeds(p: p5, ctx: CanvasRenderingContext2D): void {
+  if (seeds.length === 0) return;
+  // 星座: 小節内の順（スロット順）に線で結ぶ ─ 旋律の形が見える
+  const ordered = seeds.slice().sort((a, b) => a.slot - b.slot);
+  ctx.lineWidth = 1;
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const from = ordered[i];
+    const to = ordered[i + 1];
+    ctx.strokeStyle = `hsla(${from.hue}, 70%, 70%, ${0.1 + 0.35 * Math.max(from.flash, to.flash)})`;
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(to.x, to.y);
+    ctx.stroke();
+  }
+  const twinkle = 0.85 + 0.15 * Math.sin(p.millis() * 0.006);
+  for (const seed of seeds) {
+    const glow = seed.flash;
+    const halo = (14 + glow * 22) * twinkle;
+    const gradient = ctx.createRadialGradient(seed.x, seed.y, 0, seed.x, seed.y, halo);
+    gradient.addColorStop(0, `hsla(${seed.hue}, 90%, 75%, ${0.55 + 0.45 * glow})`);
+    gradient.addColorStop(1, `hsla(${seed.hue}, 90%, 50%, 0)`);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(seed.x, seed.y, halo, 0, Math.PI * 2);
+    ctx.fill();
+    // 十字のきらめき
+    const arm = 6 + glow * 20;
+    ctx.strokeStyle = `hsla(${seed.hue}, 60%, 90%, ${0.5 + 0.5 * glow})`;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(seed.x - arm, seed.y);
+    ctx.lineTo(seed.x + arm, seed.y);
+    ctx.moveTo(seed.x, seed.y - arm);
+    ctx.lineTo(seed.x, seed.y + arm);
+    ctx.stroke();
+  }
+}
+
+function drawChainLabel(p: p5): void {
+  const age = p.millis() - chainLabel.atMillis;
+  if (chainLabel.count < 2 || age > 1100) return;
+  const fade = 1 - age / 1100;
+  p.push();
+  p.textAlign(p.CENTER, p.CENTER);
+  p.textStyle(p.BOLD);
+  p.textSize(20 + Math.min(chainLabel.count, 12) * 3);
+  p.noStroke();
+  p.fill(chainLabel.hue, 40, 100, 90 * fade);
+  p.text(`${chainLabel.count} CHAIN`, chainLabel.x, chainLabel.y - 30 - (1 - fade) * 24);
+  p.pop();
 }
 
 // 二次爆発の予約: 種類ごとに数と間隔と色を変える（通常は強く溜めたときだけ）
@@ -561,6 +710,10 @@ function updateSecondaryBursts(p: p5, now: number): void {
 }
 
 function triggerPop(px: number, py: number, nx: number, ny: number): void {
+  const midi = tapToMidi(nx, ny);
+  audio.pop(nx, ny, midi);
+  plantSeed(px, py, nx, midi);
+  spawnShockwave(px, py, 0.12, "tier", midiHue(midi), 70);
   // particles.length を使う（PARTICLE_COUNT 固定値ではない）─
   // 自動調整で配列が切り詰められた後も範囲外アクセスにならないように
   for (let i = 0; i < POP_SPARK_COUNT; i++) {
@@ -568,8 +721,6 @@ function triggerPop(px: number, py: number, nx: number, ny: number): void {
     particles[idx].popSpark(px, py);
   }
   popSparkCursor = (popSparkCursor + POP_SPARK_COUNT) % particles.length;
-
-  audio.pop(nx, ny);
 }
 
 function spawnShockwave(
@@ -707,6 +858,9 @@ const NEBULA_BLOBS = [
 ];
 
 function drawNebula(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
+  // コード進行に合わせて全体の色合いをゆっくりずらす
+  const targetShift = CHORD_PROGRESSION[audio.getChordIndex() % CHORD_PROGRESSION.length].hueShift;
+  chordHueShift += (targetShift - chordHueShift) * 0.02;
   let intensity = 0.05;
   if (state === "charging") intensity = 0.05 + 0.05 * level;
   else if (state === "decay") intensity = 0.05 + 0.1 * energy;
@@ -715,7 +869,7 @@ function drawNebula(ctx: CanvasRenderingContext2D, w: number, h: number, now: nu
     const x = w * (0.5 + 0.38 * Math.sin(now * blob.speedX + blob.phase));
     const y = h * (0.5 + 0.34 * Math.cos(now * blob.speedY + blob.phase * 1.3));
     // 爆発直後は種類の色へ寄せる
-    let hue = blob.hue;
+    let hue = blob.hue + chordHueShift;
     if (state === "decay" && releaseStyle !== "normal") {
       const target = releaseStyle === "critical" ? CRITICAL_HUE : OVERCHARGE_HUE;
       hue = hue + (((((target - hue) % 360) + 540) % 360) - 180) * energy;
@@ -932,6 +1086,9 @@ const sketch = (p: p5) => {
       particles: particles.length,
       drawMs: drawMsAverage,
       tier: currentTier,
+      seeds: seeds.length,
+      chainCount,
+      chord: CHORD_PROGRESSION[audio.getChordIndex() % CHORD_PROGRESSION.length].name,
       overcharge: overchargeAmount,
       releaseStyle,
       releasePower,
@@ -950,6 +1107,7 @@ const sketch = (p: p5) => {
     updatePerfAutoScale(p);
     updateState(p);
     updateSecondaryBursts(p, p.millis());
+    updateSeeds(p);
     updateShake(p);
     updateCamera();
 
@@ -1027,6 +1185,11 @@ const sketch = (p: p5) => {
       wave.update(wave.kind === "tier" ? 1 : timeScale);
       wave.display();
     }
+
+    ctx.save();
+    drawSeeds(p, ctx);
+    ctx.restore();
+    drawChainLabel(p);
 
     if (state === "charging") {
       if (overchargeAmount > 0) {
