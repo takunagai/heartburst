@@ -106,6 +106,25 @@ body {
   box-shadow: 0 0 18px rgba(0, 229, 255, 0.25);
 }
 
+/* 実機診断（?debug のときだけ生成される） */
+#audio-debug {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: 8px;
+  z-index: 20;
+  margin: 0;
+  padding: 8px 10px;
+  max-width: calc(100vw - 16px);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font: 11px/1.45 ui-monospace, Menlo, monospace;
+  color: #d8fbff;
+  background: rgba(0, 0, 0, 0.72);
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 6px;
+  pointer-events: none;
+}
+
 /* 場面が移るときに浮かぶ一文 */
 #scene-caption {
   position: fixed;

@@ -68,10 +68,45 @@ const linexp = (x: number, a: number, b: number, c: number, d: number) =>
   c * Math.pow(d / c, (Math.min(Math.max(x, a), b) - a) / (b - a));
 
 // iOS の消音スイッチがオンでも鳴らすため、音声の種類を「再生」にする（Safari 16.4+ の Audio Session API。
-// 既定の "auto" では Web Audio が効果音扱いになり、消音スイッチで無音になる）。非対応ブラウザでは何もしない
-function usePlaybackAudioSession(): void {
+// 既定の "auto" では Web Audio が効果音扱いになり、消音スイッチで無音になる）。
+// 使えなければ false（非対応 iOS、または https でない ─ LAN の http で試すと使えない）
+function usePlaybackAudioSession(): boolean {
   const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
-  if (session) session.type = "playback";
+  if (!session) return false;
+  session.type = "playback";
+  return true;
+}
+
+// Audio Session API が使えないタッチ端末向けの回避策: 無音の <audio> を鳴らし続けると、
+// iOS は音声の種類を「メディア再生」に切り替え、Web Audio も消音スイッチを無視して鳴る
+function createSilentMediaElement(): HTMLAudioElement {
+  const sampleRate = 8000;
+  const sampleCount = 4000; // 0.5 秒
+  const buffer = new ArrayBuffer(44 + sampleCount);
+  const view = new DataView(buffer);
+  const writeText = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  // 8bit モノラル PCM の WAV ヘッダ
+  writeText(0, "RIFF");
+  view.setUint32(4, 36 + sampleCount, true);
+  writeText(8, "WAVE");
+  writeText(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate, true);
+  view.setUint16(32, 1, true);
+  view.setUint16(34, 8, true);
+  writeText(36, "data");
+  view.setUint32(40, sampleCount, true);
+  for (let i = 0; i < sampleCount; i++) view.setUint8(44 + i, 128); // 8bit の無音は 128
+  const element = document.createElement("audio");
+  element.src = URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+  element.loop = true;
+  element.setAttribute("playsinline", "");
+  return element;
 }
 
 // パターン層（Strudel）と共有する連続値
@@ -92,6 +127,10 @@ export class CatharsisAudioEngine implements AudioEngine {
   // 配線と素材の合成まで完了したか。ctx の有無では判定しない ─ resume() が解決しない環境
   // （ユーザー操作なしのヘッドレス等）で未配線のノードへ connect して例外になり、描画ループごと止まるため（実測）
   private isReady = false;
+  private hasAudioSession = false;
+  private silentMedia: HTMLAudioElement | null = null;
+  private silentMediaState = "unused";
+  private lastError = "";
   private clock: StrudelClock | null = null;
   private chordIndex = 0;
   private seeds: SeedNote[] = [];
@@ -132,9 +171,14 @@ export class CatharsisAudioEngine implements AudioEngine {
   // 配線は先に済ませ、再開は installUnlockListeners() が指を離した時・タップ時に行う
   async start(): Promise<void> {
     if (this.ctx) { void this.ctx.resume(); return; }
-    usePlaybackAudioSession();
+    this.hasAudioSession = usePlaybackAudioSession();
+    if (!this.hasAudioSession && navigator.maxTouchPoints > 0) {
+      this.silentMedia = createSilentMediaElement();
+      this.silentMediaState = "waiting";
+    }
     this.ctx = new AudioContext();
     void this.ctx.resume();
+    this.playSilentMedia();
     this.installUnlockListeners();
     this.fallbackOrigin = this.ctx.currentTime;
 
@@ -198,11 +242,45 @@ export class CatharsisAudioEngine implements AudioEngine {
   // iOS は着信やバックグラウンド復帰で "interrupted" / "suspended" に落ちるので、外さずに常駐させる（判定だけの軽い処理）
   private installUnlockListeners(): void {
     const unlock = () => {
-      if (this.ctx.state !== "running") void this.ctx.resume();
+      if (this.ctx.state !== "running") {
+        this.ctx.resume().catch((error: unknown) => {
+          this.lastError = `resume: ${String(error)}`;
+        });
+      }
+      this.playSilentMedia();
     };
     for (const type of ["pointerup", "touchend", "click", "keydown"]) {
       document.addEventListener(type, unlock, { capture: true, passive: true });
     }
+  }
+
+  // 無音メディアの再生（ユーザー操作の中で呼ぶ必要がある。成功するまで操作のたびに試す）
+  private playSilentMedia(): void {
+    const media = this.silentMedia;
+    if (!media || !media.paused) return;
+    media.play().then(
+      () => {
+        this.silentMediaState = "playing";
+      },
+      (error: unknown) => {
+        this.silentMediaState = `blocked (${error instanceof Error ? error.name : String(error)})`;
+      },
+    );
+  }
+
+  // 実機（特に iOS）で鳴らないときの切り分け用。?debug で画面に出す
+  getDiagnostics(): Record<string, string> {
+    return {
+      secureContext: String(window.isSecureContext),
+      audioSession: this.hasAudioSession ? "playback" : "unavailable",
+      silentMedia: this.silentMediaState,
+      contextState: this.ctx ? this.ctx.state : "not created",
+      sampleRate: this.ctx ? String(this.ctx.sampleRate) : "-",
+      ready: String(this.isReady),
+      strudel: this.clock ? (this.clock.started ? "running" : "loaded") : "not started",
+      amp: this.analyser ? this.getAmp().toFixed(3) : "-",
+      lastError: this.lastError || "-",
+    };
   }
 
   private whenRunning(): Promise<void> {

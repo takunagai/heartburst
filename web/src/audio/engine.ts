@@ -48,6 +48,7 @@ export interface AudioEngine {
   getChordIndex(): number; // コード進行の位置
   setEnergy(energy: number): void; // decay 中 1→0
   getAmp(): number; // マスター振幅 0..1
+  getDiagnostics(): Record<string, string>; // 実機で鳴らないときの切り分け用（?debug で表示）
 }
 
 export class NoopAudioEngine implements AudioEngine {
@@ -78,6 +79,9 @@ export class NoopAudioEngine implements AudioEngine {
   setEnergy(): void {}
   getAmp(): number {
     return 0;
+  }
+  getDiagnostics(): Record<string, string> {
+    return { engine: "muted (?mute)" };
   }
 }
 

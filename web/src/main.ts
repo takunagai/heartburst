@@ -908,10 +908,16 @@ function initOverlayGate(p: p5): void {
     // 待たずに溜めへ入ると、離し済みのため次のタップまで charging から抜けられない（低速端末で実測）
     let isStillHeld = true;
     window.addEventListener("pointerup", () => (isStillHeld = false), { once: true });
-    void audio.start().then(() => {
-      handlePointerDown(p, event.clientX, event.clientY);
-      if (!isStillHeld) handlePointerUp(p);
-    });
+    audio
+      .start()
+      .catch((error: unknown) => {
+        // 音声が起動できなくても作品（描画）は続ける
+        console.error("[audio] 起動に失敗", { error: String(error) });
+      })
+      .then(() => {
+        handlePointerDown(p, event.clientX, event.clientY);
+        if (!isStillHeld) handlePointerUp(p);
+      });
 
     window.setTimeout(() => overlay.remove(), 500); // トランジション終了後に DOM から除去
   };
@@ -1588,6 +1594,31 @@ const sketch = (p: p5) => {
     }
   };
 };
+
+// ---- 実機診断（?debug）: iOS などで鳴らないときに、音声の状態とエラーを画面に出す ----
+
+function initDiagnostics(): void {
+  if (!new URLSearchParams(location.search).has("debug")) return;
+  const errors: string[] = [];
+  const remember = (message: string) => {
+    errors.push(message.slice(0, 160));
+    if (errors.length > 3) errors.shift();
+  };
+  window.addEventListener("error", (event) => remember(`error: ${event.message}`));
+  window.addEventListener("unhandledrejection", (event) => remember(`rejection: ${String(event.reason)}`));
+
+  const panel = document.createElement("pre");
+  panel.id = "audio-debug";
+  document.body.appendChild(panel);
+  window.setInterval(() => {
+    const lines = Object.entries(audio.getDiagnostics()).map(([key, value]) => `${key}: ${value}`);
+    lines.push(`userAgent: ${navigator.userAgent.slice(0, 90)}`);
+    for (const message of errors) lines.push(message);
+    panel.textContent = lines.join("\n");
+  }, 500);
+}
+
+initDiagnostics();
 
 const container = document.getElementById("sketch-container");
 if (!container) {
