@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/heartburst-logo.png" alt="Heartburst" width="720" />
+</p>
+
 # Heartburst
 
 旧称 CatharsisField（2026-09-24 改名）。ネイティブ版のフォルダ名（`processing/CatharsisField/`）と公開 URL・Worker 名（`catharsisfield`）は互換のため旧名のまま。
