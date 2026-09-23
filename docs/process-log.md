@@ -293,6 +293,13 @@
   - zsh は `set -- $var` で単語分割しない → 画面サイズが渡らず全ケース同じ寸法で「収まる」と誤判定しかけた。スクショの実寸を確認して発覚。**計測値が条件を変えても同一なら、条件が効いていない疑いを先に潰す**
   - agent-browser の `press "?"` でキーが押しっぱなしになり、閉じてもすぐ開き直す（keydown が延々と届く）。記号キーは合成イベントで送る
 
+## Phase 12: 正式タイトル「Heartburst」（2026-09-24）
+
+- 候補 6 案（Heartburst / Hush & Bloom / Burst Bloom / Let Go / ためて、はなつ / モヤモヤ・ボム）からユーザーが Heartburst を選択。Heart（心・心拍 ─ 心拍に合わせるクリティカル）+ burst（解放）で「胸の内が弾ける」
+- 同名確認（Web 検索）: 同名のゲーム・アート作品は見当たらず。同名は米国の非営利向け CRM サービスと Roblox「Fisch」の効果名で、分野が異なる。商標データベース（USPTO / J-PlatPat）は未確認
+- 反映: タイトル画面・ページタイトル・meta description・OGP（日英併記）・README・音響エンジンの見出し・コンソール表記。副題「溜めて、放つ。/ Hold. Let go.」
+- 旧名のまま残したもの（互換のため）: ネイティブ版のフォルダ名 `processing/CatharsisField/`（改名すると Processing スケッチとして開けない）、公開 URL と Worker 名 `catharsisfield`（リンク切れ防止）、localStorage のキー `catharsisfield.*`（利用者の記憶が消えるため）、過去の工程ログ・設計書
+
 ## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）

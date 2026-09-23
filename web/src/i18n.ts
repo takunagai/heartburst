@@ -13,10 +13,10 @@ export type Lang = "ja" | "en";
 const STORAGE_KEY = "catharsisfield.lang";
 
 const MESSAGES = {
-  "page.title": { ja: "CatharsisField ─ 溜めて、解放する。", en: "CatharsisField ─ Charge. Release." },
+  "page.title": { ja: "Heartburst ─ 溜めて、放つ。", en: "Heartburst ─ Hold. Let go." },
   "page.description": {
-    ja: "溜めて、解放する。カタルシスを体感するインタラクティブ・アート ─ CatharsisField",
-    en: "Charge it up, then let it all go. An interactive art piece about catharsis ─ CatharsisField",
+    ja: "溜めて、放つ。胸の内を弾けさせるインタラクティブ・アート ─ Heartburst",
+    en: "Hold it in, then let it burst. An interactive art piece about catharsis ─ Heartburst",
   },
 
   "overlay.text": { ja: "長押しで溜めて、離して解き放つ", en: "Hold to charge. Let go to release." },

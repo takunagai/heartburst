@@ -114,7 +114,7 @@ const audio = createAudioEngine();
 (window as unknown as { __catharsisAudio: unknown }).__catharsisAudio = audio;
 
 // AGPLv3（web/LICENSE）ソース公開の表記。リポジトリ URL は Phase 5 の公開時に確定
-console.info("CatharsisField ─ licensed under AGPLv3. source: TBD");
+console.info("Heartburst ─ licensed under AGPLv3. source: TBD");
 
 // ---- 状態機械 ----
 

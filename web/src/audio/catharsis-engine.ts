@@ -1,4 +1,4 @@
-// CatharsisField ─ Web Audio 音響エンジン
+// Heartburst ─ Web Audio 音響エンジン
 //
 // 元は sc/main.scd の写像（chargeDrone/dropBoom/shockwave/shimmer/popPluck/master）。
 // Phase 9-1 でウェブ版独自に拡張した（ネイティブ版は旧仕様のまま）:
