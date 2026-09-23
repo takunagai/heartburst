@@ -1,20 +1,38 @@
-// CatharsisField ─ Web Audio 音響エンジン（sc/main.scd の写像）
-// 対応表: chargeDrone/dropBoom/shockwave/shimmer/popPluck/master → 各セクション
-// チューニング値はネイティブ版 sc/main.scd と揃える（変更時は両方更新）
+// CatharsisField ─ Web Audio 音響エンジン
+//
+// 元は sc/main.scd の写像（chargeDrone/dropBoom/shockwave/shimmer/popPluck/master）。
+// Phase 9-1 でウェブ版独自に拡張した（ネイティブ版は旧仕様のまま）:
+//   - ビルドアップ: 溜め中のノイズライザー + 拍に揃った加速スネアロール
+//   - 解放前の無音: 着弾まで全体（Strudel 層を含む）をダッキング
+//   - 着弾の量子化: 強い解放は Strudel の次の 16 分へ揃える
+//   - 着弾音の多層化: 小型スピーカーでも聞こえる帯域（クリック・胴・倍音）を重ねる
+//   - ドロップ区間: 着弾後 1〜2 小節、拍に揃ったキック + ベース + Strudel 層のポンピング
 
-import type { AudioEngine } from "./engine";
+import type { AudioEngine, ReleaseTiming } from "./engine";
+import type { StrudelClock } from "./pattern";
 
-// ---- チューニング定数（sc/main.scd 冒頭と対応） ----
+// ---- チューニング定数 ----
 const MASTER_VOLUME = 0.9;   // ~masterVolume
 const REVERB_MIX = 0.33;     // ~reverbMix
 const REVERB_SECONDS = 2.6;  // FreeVerb2 room 0.86 相当の減衰感
 const DRONE_LAG = 0.12;      // level 追従の平滑化（SC の .lag(0.12)）
+
+const FALLBACK_CPS = 100 / 60 / 4; // Strudel 層が無いときの自前クロック（pattern.ts の setcps と同値）
+const INHALE_SEC_MIN = 0.04;   // level=0 の解放 → 着弾の最短待ち（吸い込み演出の長さ）
+const INHALE_SEC_MAX = 0.14;   // level=1 の最短待ち。これに量子化待ち（最大 16 分 1 つ）が加わる
+const QUANTIZE_MIN_LEVEL = 0.35; // これ以上の解放だけ量子化 + ドロップ区間を付ける
+const DROP_LONG_LEVEL = 0.7;   // これ以上はドロップ 2 小節（未満は 1 小節）
+const CHARGE_CUT_SEC = 0.025;  // 解放時に溜め音を切る速さ
+
+const ROLL_LOOKAHEAD_SEC = 0.12; // スネアロールの先読みスケジュール幅
+const ROLL_TIMER_MS = 25;
 
 // ペンタトニック（C マイナーペンタ = 0,3,5,7,10）─ sc/main.scd と同一
 const PENTA = [0, 3, 5, 7, 10];
 const midicps = (m: number) => 440 * Math.pow(2, (m - 69) / 12);
 const SHIMMER_FREQS = [72, 84].flatMap((b) => PENTA.map((d) => midicps(b + d)));
 const POP_FREQS = [60, 72].flatMap((b) => PENTA.map((d) => midicps(b + d)));
+const DROP_BASS_STEPS = [0, 0, 12, 0, 3, 0, -2, -5]; // 8 分ごとの C2 からの半音差（裏拍で鳴らす）
 
 const choose = <T,>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
 const linlin = (x: number, a: number, b: number, c: number, d: number) =>
@@ -27,31 +45,48 @@ export const controlSignals = { charge: 0, energy: 0 };
 
 export class CatharsisAudioEngine implements AudioEngine {
   private ctx!: AudioContext;
-  private fxIn!: GainNode;        // 全音源の合流点（SC の ~fxBus 相当）
+  private fxIn!: GainNode;        // 残響ありの合流点（SC の ~fxBus 相当）
+  private dryIn!: GainNode;       // 残響なしの合流点（低域の濁り回避。着弾の胴・ドロップ）
+  private strudelPump!: GainNode; // Strudel 層の入口。キックに合わせてポンピング
+  private duck!: GainNode;        // 全体ダッキング（解放 → 着弾の無音）
   private analyser!: AnalyserNode;
   private analyserBuf!: Float32Array<ArrayBuffer>;
   private noiseBuf!: AudioBuffer; // 使い回すホワイトノイズ
   private tanhCurve!: Float32Array<ArrayBuffer>;
+  private exciterCurve!: Float32Array<ArrayBuffer>; // 非対称の歪み（偶数倍音 ─ 小型スピーカーで低音を「聞かせる」）
 
-  // chargeDrone のライブノード
+  private clock: StrudelClock | null = null;
+  private fallbackOrigin = 0;
+
+  // 溜め中のライブノード（ドローン + ライザー + スネアロール）
   private drone: {
     saws: OscillatorNode[];
     sub: OscillatorNode;
     lpf: BiquadFilterNode;
     vol: GainNode;      // level 追従音量
     beatGain: GainNode; // 心拍振幅（パルスをスケジュール）
-    out: GainNode;      // ASR エンベロープ
+    out: GainNode;      // ASR エンベロープ（ドローン・ライザー・ロールの合流点）
+    riser: AudioBufferSourceNode;
+    riserBpf: BiquadFilterNode;
+    riserGain: GainNode;
     beatTimer: number | null;
+    rollTimer: number | null;
+    nextRollTime: number;
     level: number;
   } | null = null;
+
+  private dropBus: GainNode | null = null; // 進行中のドロップ区間（次の溜めで止める）
 
   async start(): Promise<void> {
     if (this.ctx) { await this.ctx.resume(); return; }
     this.ctx = new AudioContext();
     await this.ctx.resume();
+    this.fallbackOrigin = this.ctx.currentTime;
 
-    // ---- master: fxIn → [dry, convolver reverb] → limiter → destination ----
+    // ---- master: [fxIn → dry/reverb] + dryIn + strudelPump → master → duck → limiter → destination ----
     this.fxIn = this.ctx.createGain();
+    this.dryIn = this.ctx.createGain();
+    this.strudelPump = this.ctx.createGain();
     const dry = this.ctx.createGain();
     dry.gain.value = 1 - REVERB_MIX;
     const wet = this.ctx.createGain();
@@ -68,6 +103,7 @@ export class CatharsisAudioEngine implements AudioEngine {
 
     const master = this.ctx.createGain();
     master.gain.value = MASTER_VOLUME;
+    this.duck = this.ctx.createGain();
 
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 512;
@@ -75,25 +111,68 @@ export class CatharsisAudioEngine implements AudioEngine {
 
     this.fxIn.connect(dry).connect(master);
     this.fxIn.connect(reverb).connect(wet).connect(master);
-    master.connect(limiter);
+    this.dryIn.connect(master);
+    this.strudelPump.connect(master);
+    master.connect(this.duck).connect(limiter);
     limiter.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
 
     // ---- 使い回し素材 ----
     this.noiseBuf = this.buildNoiseBuffer(2.0);
-    this.tanhCurve = this.buildTanhCurve(2048);
+    this.tanhCurve = this.buildCurve(2048, (x) => Math.tanh(x));
+    this.exciterCurve = this.buildCurve(2048, (x) => Math.tanh(x + 0.6) - Math.tanh(0.6));
     this.buildPluckBank(); // KS プラック 20 音をオフライン合成（数十 ms・ゲート直後なので許容）
 
     // ---- パターン層（Strudel・オプショナル）─ 失敗しても本体は動く ----
     const { startPatternLayer } = await import("./pattern");
-    void startPatternLayer(this.ctx);
+    void startPatternLayer(this.ctx, this.strudelPump).then((clock) => {
+      this.clock = clock;
+    });
   }
 
-  // ============ chargeDrone（\chargeDrone の写像） ============
+  // ============ 拍グリッド（Strudel スケジューラと同じ時間軸） ============
+
+  // Strudel が動いていればその換算式、無ければ自前クロック。1 cycle = 1 小節（4 拍）
+  private gridParams(): { cps: number; n0: number; s0: number } {
+    const c = this.clock;
+    if (c && c.started && typeof c.seconds_at_cps_change === "number" && c.cps > 0) {
+      return { cps: c.cps, n0: c.num_cycles_at_cps_change, s0: c.seconds_at_cps_change + (c.latency ?? 0) };
+    }
+    return { cps: FALLBACK_CPS, n0: 0, s0: this.fallbackOrigin };
+  }
+
+  // time 以降で最初の「1 小節を division 等分した拍」の時刻
+  private nextGridTime(time: number, division: number): number {
+    const { cps, n0, s0 } = this.gridParams();
+    const cycle = (time - s0) * cps + n0;
+    const snapped = Math.ceil(cycle * division - 1e-6) / division;
+    return (snapped - n0) / cps + s0;
+  }
+
+  // [from, to) の division 分割グリッド時刻と、そのグリッド番号（小節内の位置判定用）
+  private gridTimes(from: number, to: number, division: number): { time: number; index: number }[] {
+    const { cps, n0, s0 } = this.gridParams();
+    const out: { time: number; index: number }[] = [];
+    let step = Math.ceil(((from - s0) * cps + n0) * division - 1e-6);
+    for (;;) {
+      const time = (step / division - n0) / cps + s0;
+      if (time >= to) break;
+      out.push({ time, index: step });
+      step++;
+    }
+    return out;
+  }
+
+  private barSeconds(): number {
+    return 1 / this.gridParams().cps;
+  }
+
+  // ============ 溜め（\chargeDrone の写像 + ライザー + スネアロール） ============
 
   chargeStart(_x: number, _y: number): void {
     if (!this.ctx) return;
     this.stopDrone(0.05); // 連打で残っていたら即始末
+    this.stopDrop(0.35);  // 前回のドロップ区間は溜め直しで退場させる
     const t = this.ctx.currentTime;
 
     const lpf = this.ctx.createBiquadFilter();
@@ -129,8 +208,25 @@ export class CatharsisAudioEngine implements AudioEngine {
     subMix.connect(lpf);
     lpf.connect(vol).connect(beatGain).connect(out).connect(this.fxIn);
 
-    this.drone = { saws, sub, lpf, vol, beatGain, out, beatTimer: null, level: 0 };
+    // ライザー: ループするノイズを帯域通過。中心周波数と音量が level で上がる
+    const riser = this.ctx.createBufferSource();
+    riser.buffer = this.noiseBuf;
+    riser.loop = true;
+    const riserBpf = this.ctx.createBiquadFilter();
+    riserBpf.type = "bandpass";
+    riserBpf.frequency.value = 400;
+    riserBpf.Q.value = 2;
+    const riserGain = this.ctx.createGain();
+    riserGain.gain.value = 0;
+    riser.connect(riserBpf).connect(riserGain).connect(out);
+    riser.start(t);
+
+    this.drone = {
+      saws, sub, lpf, vol, beatGain, out, riser, riserBpf, riserGain,
+      beatTimer: null, rollTimer: null, nextRollTime: t, level: 0,
+    };
     this.scheduleHeartbeat();
+    this.drone.rollTimer = window.setInterval(() => this.scheduleRoll(), ROLL_TIMER_MS);
   }
 
   chargeLevel(level: number): void {
@@ -149,6 +245,10 @@ export class CatharsisAudioEngine implements AudioEngine {
     this.drone.sub.frequency.setTargetAtTime(freq * 0.5, t, DRONE_LAG);
     this.drone.lpf.frequency.setTargetAtTime(cutoff, t, DRONE_LAG);
     this.drone.vol.gain.setTargetAtTime(volume, t, DRONE_LAG);
+
+    this.drone.riserBpf.frequency.setTargetAtTime(linexp(l, 0, 1, 400, 9000), t, DRONE_LAG);
+    this.drone.riserBpf.Q.setTargetAtTime(linlin(l, 0, 1, 2, 7), t, DRONE_LAG);
+    this.drone.riserGain.gain.setTargetAtTime(0.28 * l * l, t, DRONE_LAG);
   }
 
   // 心拍: level で速度 0.8→3Hz のパルス（SC の Impulse+Decay2 相当を逐次スケジュール）
@@ -164,61 +264,173 @@ export class CatharsisAudioEngine implements AudioEngine {
     d.beatTimer = window.setTimeout(() => this.scheduleHeartbeat(), 1000 / rate);
   }
 
+  // スネアロール: 拍に揃えて先読みスケジュール。level で 4 分 → 8 分 → 16 分 → 32 分と細かくなる（EDM のビルドアップ）
+  private scheduleRoll(): void {
+    const d = this.drone;
+    if (!d) return;
+    const now = this.ctx.currentTime;
+    if (d.level < 0.12) {
+      d.nextRollTime = now;
+      return;
+    }
+    const division = d.level < 0.35 ? 4 : d.level < 0.6 ? 8 : d.level < 0.85 ? 16 : 32;
+    const horizon = now + ROLL_LOOKAHEAD_SEC;
+    let t = this.nextGridTime(Math.max(d.nextRollTime, now + 0.005), division);
+    while (t < horizon) {
+      this.rollHit(t, d.level, d.out);
+      t = this.nextGridTime(t + 0.001, division);
+    }
+    d.nextRollTime = t;
+  }
+
+  private rollHit(t: number, level: number, dest: AudioNode): void {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const bpf = this.ctx.createBiquadFilter();
+    bpf.type = "bandpass";
+    bpf.frequency.value = linexp(level, 0, 1, 1200, 3400);
+    bpf.Q.value = 1.1;
+    const env = this.ctx.createGain();
+    const amp = 0.06 + 0.5 * Math.pow(level, 1.6);
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(amp, t + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
+    src.connect(bpf).connect(env).connect(dest);
+    const offset = Math.random() * 1.5; // ノイズバッファの読み出し位置をずらして毎打の質感を変える
+    src.start(t, offset);
+    src.stop(t + 0.09);
+  }
+
   private stopDrone(releaseSec: number): void {
     const d = this.drone;
     if (!d) return;
     this.drone = null;
     if (d.beatTimer !== null) clearTimeout(d.beatTimer);
+    if (d.rollTimer !== null) clearInterval(d.rollTimer);
     const t = this.ctx.currentTime;
     d.out.gain.cancelScheduledValues(t);
+    d.out.gain.setValueAtTime(d.out.gain.value, t);
     d.out.gain.setTargetAtTime(0.0001, t, Math.max(releaseSec, 0.02) / 3);
     const stopAt = t + Math.max(releaseSec, 0.02) * 2 + 0.1;
     [...d.saws, d.sub].forEach((o) => o.stop(stopAt));
+    d.riser.stop(stopAt);
   }
 
-  // ============ release（\dropBoom + \shockwave + shimmer 群） ============
+  private stopDrop(releaseSec: number): void {
+    const bus = this.dropBus;
+    if (!bus) return;
+    this.dropBus = null;
+    const t = this.ctx.currentTime;
+    bus.gain.cancelScheduledValues(t);
+    bus.gain.setValueAtTime(bus.gain.value, t);
+    bus.gain.setTargetAtTime(0, t, releaseSec / 3);
+    this.strudelPump.gain.cancelScheduledValues(t);
+    this.strudelPump.gain.setTargetAtTime(1, t, 0.05);
+    window.setTimeout(() => bus.disconnect(), (releaseSec * 3 + 0.2) * 1000);
+  }
 
-  release(level: number, x: number, _y: number): void {
-    if (!this.ctx) return;
+  // ============ 解放 ============
+  //
+  // 1. 溜め音を即カット + 全体をダッキング（無音の間）
+  // 2. 着弾時刻を決める: 吸い込みの最短待ち → 強い解放は次の 16 分へ量子化
+  // 3. 着弾時刻に着弾音・衝撃音・シャワー・ドロップ区間を予約し、ダッキングを戻す
+  release(level: number, x: number, _y: number): ReleaseTiming {
+    if (!this.ctx) return { impactDelaySec: INHALE_SEC_MIN, dropSec: 0 };
     const l = Math.min(Math.max(level, 0), 1);
-    const pan = (x * 2 - 1);
+    const pan = x * 2 - 1;
+    const now = this.ctx.currentTime;
     controlSignals.charge = 0;
     controlSignals.energy = 1;
 
-    this.stopDrone(1.6); // SC の Env.asr release 1.6s
-    this.dropBoom(linlin(l, 0, 1, 0.3, 0.95), pan * 0.3);
-    this.shockwave(linlin(l, 0, 1, 0.25, 0.7), pan * 0.5);
-    this.shimmerShower(l);
+    this.stopDrone(CHARGE_CUT_SEC);
+
+    const isBig = l >= QUANTIZE_MIN_LEVEL;
+    let impact = now + linlin(l, 0, 1, INHALE_SEC_MIN, INHALE_SEC_MAX);
+    if (isBig) impact = this.nextGridTime(impact, 16);
+
+    // 無音の間（着弾の直前まで）。弱い解放は間が短すぎて聞き分けられないので掛けない
+    const g = this.duck.gain;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    if (isBig) {
+      g.linearRampToValueAtTime(0, now + 0.02);
+      g.setValueAtTime(0, impact - 0.003);
+    }
+    g.linearRampToValueAtTime(1, impact);
+
+    this.impactHit(linlin(l, 0, 1, 0.3, 0.95), pan * 0.3, impact);
+    this.shockwave(linlin(l, 0, 1, 0.25, 0.7), pan * 0.5, impact);
+    window.setTimeout(() => this.shimmerShower(l), (impact - now) * 1000);
+
+    let dropSec = 0;
+    if (isBig) {
+      dropSec = this.barSeconds() * (l >= DROP_LONG_LEVEL ? 2 : 1);
+      this.dropSection(impact, dropSec, l);
+    }
+
+    const outputLatency = this.ctx.outputLatency || this.ctx.baseLatency || 0;
+    return { impactDelaySec: impact - now + outputLatency, dropSec };
   }
 
-  private dropBoom(amp: number, pan: number): void {
-    const t = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(60, t);
-    osc.frequency.exponentialRampToValueAtTime(28, t + 0.6);
-
-    // tanh ソフトクリップ: drive を前段ゲインで与える（SC: (sig*(1.6+amp*3)).tanh）
-    const drive = this.ctx.createGain();
-    drive.gain.value = 1.6 + amp * 3;
-    const shaper = this.ctx.createWaveShaper();
-    shaper.curve = this.tanhCurve;
-
-    const env = this.ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t);
-    env.gain.exponentialRampToValueAtTime(amp * 0.9, t + 0.004);
-    env.gain.exponentialRampToValueAtTime(0.0001, t + 5.0);
-
+  // 着弾音: 帯域ごとに層を分け、小型スピーカー（〜150Hz 以下がほぼ出ない）でも重さが伝わるようにする
+  //   sub     : 150→48→32Hz のピッチ降下 sine を tanh で歪ませる（ヘッドホン・大型スピーカー向けの本体）
+  //   exciter : 同じ sine を非対称に歪ませ 110Hz 以上だけ通す（倍音で低音を「感じさせる」）
+  //   body    : 220→110Hz の三角波（胴鳴り）
+  //   click   : 2kHz 以上のノイズ 20ms（アタックの輪郭 ─ スマホで一番効く）
+  //   crack   : 1.8kHz 帯域のノイズ（破裂感。残響へ送る）
+  //   tail    : 旧 dropBoom の長い 60→28Hz（余韻）
+  private impactHit(amp: number, pan: number, t: number): void {
     const panner = this.ctx.createStereoPanner();
     panner.pan.value = pan;
+    panner.connect(this.dryIn);
 
-    osc.connect(drive).connect(shaper).connect(env).connect(panner).connect(this.fxIn);
+    const osc = this.ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(48, t + 0.18);
+    osc.frequency.exponentialRampToValueAtTime(32, t + 1.6);
     osc.start(t);
-    osc.stop(t + 5.2);
+    osc.stop(t + 2.8);
+
+    const drive = this.ctx.createGain();
+    drive.gain.value = 1.8 + amp * 3;
+    const shaper = this.ctx.createWaveShaper();
+    shaper.curve = this.tanhCurve;
+    const subEnv = this.envelope(t, amp * 0.85, 0.003, 2.6);
+    osc.connect(drive).connect(shaper).connect(subEnv).connect(panner);
+
+    const exDrive = this.ctx.createGain();
+    exDrive.gain.value = 3 + amp * 3;
+    const exShaper = this.ctx.createWaveShaper();
+    exShaper.curve = this.exciterCurve;
+    const exHpf = this.ctx.createBiquadFilter();
+    exHpf.type = "highpass";
+    exHpf.frequency.value = 110;
+    const exEnv = this.envelope(t, amp * 0.45, 0.003, 0.9);
+    osc.connect(exDrive).connect(exShaper).connect(exHpf).connect(exEnv).connect(panner);
+
+    const body = this.ctx.createOscillator();
+    body.type = "triangle";
+    body.frequency.setValueAtTime(220, t);
+    body.frequency.exponentialRampToValueAtTime(110, t + 0.12);
+    body.start(t);
+    body.stop(t + 0.3);
+    body.connect(this.envelope(t, amp * 0.5, 0.002, 0.22)).connect(panner);
+
+    this.noiseHit(t, "highpass", 2000, 0.7, amp * 0.8, 0.02, panner);
+    this.noiseHit(t, "bandpass", 1800, 0.9, amp * 1.4, 0.28, this.fxIn);
+
+    // 余韻（旧 dropBoom。音量は控えめにして sub と住み分ける）
+    const tail = this.ctx.createOscillator();
+    tail.type = "sine";
+    tail.frequency.setValueAtTime(60, t);
+    tail.frequency.exponentialRampToValueAtTime(28, t + 0.6);
+    tail.start(t);
+    tail.stop(t + 5.2);
+    tail.connect(this.envelope(t + 0.05, amp * 0.4, 0.05, 5.0)).connect(this.fxIn);
   }
 
-  private shockwave(amp: number, pan: number): void {
-    const t = this.ctx.currentTime;
+  private shockwave(amp: number, pan: number, t: number): void {
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuf;
 
@@ -228,10 +440,7 @@ export class CatharsisAudioEngine implements AudioEngine {
     bpf.frequency.setValueAtTime(8000, t);
     bpf.frequency.exponentialRampToValueAtTime(200, t + 0.6);
 
-    const env = this.ctx.createGain();
-    env.gain.setValueAtTime(0.0001, t);
-    env.gain.exponentialRampToValueAtTime(amp * 3.0, t + 0.004); // BPF の帯域損失を補償
-    env.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    const env = this.envelope(t, amp * 3.0, 0.004, 0.6); // BPF の帯域損失を補償
 
     const panner = this.ctx.createStereoPanner();
     panner.pan.value = pan;
@@ -239,6 +448,78 @@ export class CatharsisAudioEngine implements AudioEngine {
     src.connect(bpf).connect(env).connect(panner).connect(this.fxIn);
     src.start(t);
     src.stop(t + 0.7);
+  }
+
+  // ドロップ区間: 着弾を 1 拍目とみなし、以後の 4 分にキック、裏の 8 分にベース。
+  // キックごとに Strudel 層を沈めてポンピング（サイドチェイン風）させる
+  private dropSection(impact: number, lengthSec: number, level: number): void {
+    const bus = this.ctx.createGain();
+    bus.connect(this.dryIn);
+    this.dropBus = bus;
+    const end = impact + lengthSec;
+    const kickAmp = linlin(level, 0, 1, 0.45, 0.7);
+
+    const pump = this.strudelPump.gain;
+    pump.cancelScheduledValues(impact);
+    this.pumpAt(impact, 0.2);
+
+    for (const { time } of this.gridTimes(impact + 0.05, end, 4)) {
+      this.kick(time, kickAmp, bus);
+      this.pumpAt(time, 0.35);
+    }
+    for (const { time, index } of this.gridTimes(impact + 0.02, end, 8)) {
+      if (index % 2 === 0) continue; // 裏拍だけ
+      const step = DROP_BASS_STEPS[Math.floor(index / 2) % DROP_BASS_STEPS.length];
+      this.bassNote(time, midicps(36 + step), linlin(level, 0, 1, 0.14, 0.24), bus);
+    }
+    // 区間の最後は 1 小節の半分で自然に抜ける（次の溜めが来なければ Strudel 層の余韻へ）
+    bus.gain.setValueAtTime(1, end - 0.05);
+    bus.gain.linearRampToValueAtTime(0.0001, end + 0.4);
+  }
+
+  private pumpAt(t: number, depth: number): void {
+    const pump = this.strudelPump.gain;
+    pump.setValueAtTime(depth, t);
+    pump.setTargetAtTime(1, t + 0.03, 0.09);
+  }
+
+  private kick(t: number, amp: number, dest: AudioNode): void {
+    const osc = this.ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(140, t);
+    osc.frequency.exponentialRampToValueAtTime(45, t + 0.11);
+    osc.start(t);
+    osc.stop(t + 0.5);
+    const drive = this.ctx.createGain();
+    drive.gain.value = 2.2;
+    const shaper = this.ctx.createWaveShaper();
+    shaper.curve = this.tanhCurve;
+    osc.connect(drive).connect(shaper).connect(this.envelope(t, amp, 0.002, 0.42)).connect(dest);
+
+    const exDrive = this.ctx.createGain();
+    exDrive.gain.value = 3;
+    const exShaper = this.ctx.createWaveShaper();
+    exShaper.curve = this.exciterCurve;
+    const exHpf = this.ctx.createBiquadFilter();
+    exHpf.type = "highpass";
+    exHpf.frequency.value = 120;
+    osc.connect(exDrive).connect(exShaper).connect(exHpf).connect(this.envelope(t, amp * 0.35, 0.002, 0.2)).connect(dest);
+
+    this.noiseHit(t, "highpass", 2500, 0.7, amp * 0.35, 0.012, dest);
+  }
+
+  private bassNote(t: number, freq: number, amp: number, dest: AudioNode): void {
+    const osc = this.ctx.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.value = freq;
+    osc.start(t);
+    osc.stop(t + 0.3);
+    const lpf = this.ctx.createBiquadFilter();
+    lpf.type = "lowpass";
+    lpf.Q.value = 4;
+    lpf.frequency.setValueAtTime(1600, t);
+    lpf.frequency.exponentialRampToValueAtTime(220, t + 0.2);
+    osc.connect(lpf).connect(this.envelope(t, amp, 0.004, 0.24)).connect(dest);
   }
 
   // シャワー: 密度 ∝ level から 3 秒で減衰（sc/main.scd の Routine と同ロジック）
@@ -331,6 +612,31 @@ export class CatharsisAudioEngine implements AudioEngine {
     return Math.min(rms * 2.5, 1); // /sc/amp と同レンジ感に正規化
   }
 
+  // ============ 部品 ============
+
+  // 指数エンベロープ（t で立ち上がり attack 秒でピーク、release 秒で -80dB）
+  private envelope(t: number, peak: number, attack: number, release: number): GainNode {
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t + attack);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + attack + release);
+    return env;
+  }
+
+  private noiseHit(
+    t: number, type: BiquadFilterType, freq: number, q: number, amp: number, decay: number, dest: AudioNode,
+  ): void {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const filter = this.ctx.createBiquadFilter();
+    filter.type = type;
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    src.connect(filter).connect(this.envelope(t, amp, 0.001, decay)).connect(dest);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + decay + 0.05);
+  }
+
   // ============ 素材生成 ============
 
   private buildNoiseBuffer(seconds: number): AudioBuffer {
@@ -354,11 +660,11 @@ export class CatharsisAudioEngine implements AudioEngine {
     return buf;
   }
 
-  private buildTanhCurve(n: number): Float32Array<ArrayBuffer> {
+  // 入力 -4..4 を写像する WaveShaper カーブ
+  private buildCurve(n: number, fn: (x: number) => number): Float32Array<ArrayBuffer> {
     const curve = new Float32Array(n);
     for (let i = 0; i < n; i++) {
-      const x = (i / (n - 1)) * 8 - 4; // -4..4
-      curve[i] = Math.tanh(x);
+      curve[i] = fn((i / (n - 1)) * 8 - 4);
     }
     return curve;
   }

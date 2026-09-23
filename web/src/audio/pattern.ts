@@ -9,21 +9,43 @@
 
 import { controlSignals } from "./catharsis-engine";
 
-// Strudel（AGPLv3）は動的 import ─ クリックゲート後に初めてロードする
-export async function startPatternLayer(ctx: AudioContext): Promise<boolean> {
+// Strudel スケジューラ（@strudel/core の Cyclist）のうち、拍位置の換算に使う内部フィールド。
+// 公開 API ではないため、読み出し側（catharsis-engine.ts）は欠損時に自前クロックへ退避する。
+// 換算式は Cyclist の onTrigger と同一: 発音時刻 = (cycle - n0) / cps + s0 + latency
+export interface StrudelClock {
+  started: boolean;
+  cps: number;
+  latency: number;
+  num_cycles_at_cps_change: number;
+  seconds_at_cps_change: number | undefined;
+}
+
+// Strudel（AGPLv3）は動的 import ─ クリックゲート後に初めてロードする。
+// destination: Strudel の出力の接続先（音響エンジンのマスター系統。無音の間・ポンピングを一括で掛けるため）
+export async function startPatternLayer(ctx: AudioContext, destination: AudioNode): Promise<StrudelClock | null> {
   try {
     const strudel: any = await import("@strudel/web");
     strudel.setAudioContext?.(ctx); // 音響エンジンと同一 AudioContext を共有
-    await strudel.initStrudel();
+    const repl = await strudel.initStrudel();
     // initAudioOnFirstClick は「次のクリック」を待ってしまう（ゲートのクリックは消費済み）。
     // ここは既にユーザー操作後なので worklet ロードを明示的に済ませる
     await strudel.initAudio?.();
     (globalThis as any).__catharsis = controlSignals;
     await strudel.evaluate(PATTERN_CODE);
-    return true;
+
+    // superdough の最終段（destinationGain → ctx.destination）を付け替え、エンジンのマスター系統へ合流させる
+    const output: GainNode | null | undefined = strudel.getSuperdoughAudioController?.()?.output?.destinationGain;
+    if (output) {
+      output.disconnect();
+      output.connect(destination);
+    } else {
+      console.warn("[pattern] Strudel の出力ノードが見つからない（無音の間・ポンピングは Strudel 層に掛からない）");
+    }
+
+    return (repl?.scheduler as StrudelClock | undefined) ?? null;
   } catch (error) {
     console.warn("[pattern] Strudel 層の起動に失敗（本体は継続）:", error);
-    return false;
+    return null;
   }
 }
 

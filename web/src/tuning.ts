@@ -9,7 +9,7 @@
 
 export const PARTICLE_COUNT = 4000; // PARTICLE_COUNT
 export const POP_SPARK_COUNT = 20; // POP_SPARK_COUNT
-export const MAX_SHOCKWAVES = 6; // MAX_SHOCKWAVES
+export const MAX_SHOCKWAVES = 9; // 1 回の解放で先行波・本波・残響波の 3 本を使う（Phase 9-1）
 
 export const BG_COLOR_HEX = "#050508"; // BG_COLOR
 export const COLOR_CYAN_HEX = "#00E5FF"; // COLOR_CYAN
@@ -56,6 +56,52 @@ export const DECAY_SPEED_REF = 6.0; // DECAY_SPEED_REF ─ decay 中、この速
 
 export const VIGNETTE_INNER = 0.35; // VIGNETTE_INNER ─ このデフォルト距離比から暗さが始まる
 export const VIGNETTE_MAX_ALPHA = 200; // VIGNETTE_MAX_ALPHA ─ level=1 のときのヴィネット最大不透明度（RGB colorMode の 0-255 レンジで使用）
+
+// ------------------------------------------------------------
+// 解放シーケンス（Phase 9-1 ─ ウェブ版独自。ネイティブ版には無い）
+//
+//   pointerup ─→ inhale（吸い込み + 無音。音響側が次の 16 分に量子化した着弾時刻まで）
+//             ─→ impact（ヒットストップ ─ 物理停止・フラッシュ保持）
+//             ─→ decay（スローモーションから等速へ戻る）
+// ------------------------------------------------------------
+export const INHALE_PULL_MUL = 2.2; // inhale 中の引力倍率（PULL_STRENGTH_MAX 基準）
+export const INHALE_MIN_ORBIT = 5; // inhale 中の最小軌道半径
+export const HITSTOP_MS_MIN = 30; // level=0 のヒットストップ長
+export const HITSTOP_MS_MAX = 95; // level=1 のヒットストップ長
+export const SLOWMO_TIME_SCALE = 0.3; // ヒットストップ明けの時間倍率（level=1 のとき。level=0 は 1.0）
+export const SLOWMO_RECOVER_MS = 1100; // 等速へ戻るまでの時間
+export const FLASH_ALPHA_MIN = 35; // level=0 のフラッシュ不透明度（alpha レンジ 100）
+export const FLASH_ALPHA_MAX = 70; // level=1 のフラッシュ不透明度
+
+// カメラ（ズームは解放地点を中心に掛ける）
+export const ZOOM_INHALE = 0.07; // inhale 中のズームイン量（level=1 のとき 1.07 倍）
+export const ZOOM_IMPACT_KICK = -0.09; // 着弾時のズームアウト初速（パンチ）
+export const ZOOM_SPRING = 0.14; // ばね定数
+export const ZOOM_DAMPING = 0.72; // 減衰
+
+// 速度ストリーク（粒子を速度方向の線で描く）
+export const STREAK_MIN_SPEED = 1.6; // これ未満は点として描く
+export const STREAK_LENGTH_PER_SPEED = 1.5; // 線の長さ = 速度 × この値
+export const STREAK_MAX_LENGTH = 70;
+
+// 画面外への飛散と再流入（爆発中は端ワープしない）
+export const EDGE_ESCAPE_MARGIN = 40; // 画面外判定の余白
+export const EDGE_RESPAWN_SPEED = 1.2; // 画面外でこの速度未満になったら端から再流入させる
+
+// 衝撃波の歪み（通過した粒子を外へ押す）
+export const SHOCKWAVE_PUSH_BAND = 60; // 波面からこの距離以内の粒子を押す
+export const SHOCKWAVE_PUSH_FORCE = 3.2; // level=1 の押し出し量
+export const SHOCKWAVE_ECHO_DELAY_FRAMES = 9; // 残響波の遅延
+
+// 色温度（溜めで白熱、爆発で全色相へ散って戻る）
+export const CHARGE_DESATURATE = 0.85; // level=1 で彩度をこの割合だけ落とす（白熱）
+export const BURST_HUE_SPREAD = 360; // 爆発直後の色相の散らばり幅
+
+// グロー（縮小キャンバスをぼかして screen 合成で重ねる）
+export const GLOW_DOWNSCALE = 6; // 本体の 1/6 解像度
+export const GLOW_BLUR_PX = 2.5; // 縮小キャンバス上のぼかし半径（ctx.filter 非対応環境では縮小・拡大の補間だけで代替）
+export const GLOW_OPACITY_IDLE = 0.35;
+export const GLOW_OPACITY_PEAK = 0.95;
 
 // ------------------------------------------------------------
 // 粒子数の自動調整（Phase 4）
