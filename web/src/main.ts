@@ -881,13 +881,15 @@ function handleDeviceMotion(p: p5, event: DeviceMotionEvent): void {
 }
 
 // iOS 13+ はモーションセンサーの利用にユーザー操作起点の許可要求が必要
+// iOS Safari は https でないページに DeviceMotionEvent 自体を公開しない。参照するだけで ReferenceError になり、
+// 導入ゲートの後続（音声の起動）ごと止まっていた ─ iPhone で全く無音だった原因（?debug の診断で実測）
 function requestMotionPermission(): void {
+  if (typeof DeviceMotionEvent === "undefined") return;
   const motion = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<string> };
-  if (typeof motion.requestPermission === "function") {
-    motion.requestPermission().catch(() => {
-      // 拒否されても振って解放が使えないだけ。本体は動く
-    });
-  }
+  if (typeof motion.requestPermission !== "function") return;
+  motion.requestPermission().catch(() => {
+    // 拒否されても振って解放が使えないだけ。本体は動く
+  });
 }
 
 // ---- 導入オーバーレイ（初回 pointerdown で AudioContext を起動しつつ
@@ -902,7 +904,8 @@ function initOverlayGate(p: p5): void {
     overlay.removeEventListener("pointerdown", onFirstPointerDown);
     overlay.classList.add("overlay--hidden");
     document.getElementById("word-ui")?.classList.add("is-ready");
-    if (event.pointerType === "touch") requestMotionPermission();
+    // モーションセンサーの許可要求もユーザー操作の中でしか通らない。タッチは指を離した時が該当するので touchend で呼ぶ
+    if (event.pointerType === "touch") window.addEventListener("touchend", requestMotionPermission, { once: true });
 
     // 音声の起動（Strudel 読み込み・プラック合成）を待つ間に指が離れていたら、溜めでなくタップとして扱う。
     // 待たずに溜めへ入ると、離し済みのため次のタップまで charging から抜けられない（低速端末で実測）

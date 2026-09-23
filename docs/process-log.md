@@ -223,6 +223,16 @@
 - 残る仕様: スマホでは最初の長押し（導入ゲート）の間は無音で、指を離した瞬間から鳴る（ブラウザの仕様上、最初の音は指を離すまで出せない）
 - 学び（スキル還流候補）: Web Audio の解錠は「マウスは押下、タッチは指を離した時」。ゲートを pointerdown で作るならタッチ用に pointerup / touchend でも resume() を呼ぶ。検証は PC のマウスだけでは通ってしまう
 
+## Phase 9-7: iPhone で無音の真因（2026-09-24）
+
+- 9-6 の修正後も iPhone（iOS 18.7・LAN の http）で全く無音。推測で直すのをやめ、`?debug` の実機診断表示（音声の状態・https か・消音対策・直近のエラー）を入れて iPhone で見てもらった
+- 診断結果: `contextState: not created` + `ReferenceError: Can't find variable: DeviceMotionEvent` ─ **iOS Safari は https でないページに `DeviceMotionEvent` 自体を公開しない**。導入ゲートが音声の起動より先に「振って解放」の許可要求を呼び、その中の参照で例外 → 音声の起動が 1 行も実行されていなかった
+- 修正: `typeof DeviceMotionEvent === "undefined"` なら何もしない、許可要求はユーザー操作として通る touchend で呼ぶ（pointerdown はタッチでは user activation にならない）。Chromium で `delete window.DeviceMotionEvent` した上で CDP の本物のタッチを送り、起動 → running → 溜め・解放で発音を確認
+- 同時に入れた保険: Audio Session API が使えない環境（http・古い iOS）では無音の `<audio>` を鳴らし続けて消音スイッチを回避
+- 学び（スキル還流候補）:
+  - **実機でしか起きない不具合は、推測の修正を重ねる前に画面へ診断を出す**（9-6 は仮説が 1 つ外れていた。診断 1 回で真因に届いた）
+  - セキュアコンテキスト限定の API（DeviceMotionEvent・AudioWorklet・audioSession 等）は LAN の http 検証で消える。参照は typeof で守り、ユーザー操作のハンドラでは例外が後続を巻き込まないよう、重要な処理（音声の起動）を先に置く
+
 ## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）
