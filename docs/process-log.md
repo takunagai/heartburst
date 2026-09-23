@@ -211,6 +211,18 @@
   - 粒子数 4000 → 8000、画面外（余白 80px の外）の粒子は描画を省いて計算だけ。自動削減の段は 8000 / 5000 / 3000
 - 効果: 溜めは四方から途切れず吸い込まれる円形の渦に、爆発は円形の輪に。画面内に映る粒子は約 4200（旧 4000 と同等）で、3 分間の放置でも 4000〜4400 に収まる（中心への寄せ過ぎ・散り過ぎなし）。draw は idle 4.0ms / 溜め 6.3ms（ヘッドレス 1440×900）
 
+## Phase 9-6: スマホで無音の修正（2026-09-24）
+
+- 症状（ユーザー実機報告）: スマホで音が全く出ない。PC は鳴る
+- 原因: HTML の user activation は、タッチだと pointerup / touchend で成立し、**pointerdown では成立しない**（マウスは pointerdown で成立）。導入ゲートが pointerdown で `AudioContext.resume()` し、その解決を `await` していたため、スマホでは ctx が suspended のまま（Strudel も起動しない）
+- 再現と確認: agent-browser の Chrome に CDP で直接つなぎ、`Emulation.setTouchEmulationEnabled` + `Input.dispatchTouchEvent` で本物のタッチを送るスクリプトで実測。修正前 = touchStart 後も touchEnd 後も suspended・振幅 0。修正後 = touchEnd で running・Strudel 起動・溜め 0.166 / 解放 0.310。マウス経路も押下時点で running（回帰なし）
+- 修正:
+  - `start()` は `resume()` を待たずに配線を済ませ、pointerup / touchend / click / keydown のたびに止まっていれば再開する常駐リスナーを置く（iOS の着信・バックグラウンド復帰で止まった場合もこれで戻る）
+  - Strudel は `statechange` で running になってから起動
+  - iOS の消音スイッチ対策に `navigator.audioSession.type = "playback"`（Safari 16.4+、非対応なら何もしない）
+- 残る仕様: スマホでは最初の長押し（導入ゲート）の間は無音で、指を離した瞬間から鳴る（ブラウザの仕様上、最初の音は指を離すまで出せない）
+- 学び（スキル還流候補）: Web Audio の解錠は「マウスは押下、タッチは指を離した時」。ゲートを pointerdown で作るならタッチ用に pointerup / touchend でも resume() を呼ぶ。検証は PC のマウスだけでは通ってしまう
+
 ## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）

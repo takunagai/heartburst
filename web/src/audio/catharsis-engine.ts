@@ -67,6 +67,13 @@ const linlin = (x: number, a: number, b: number, c: number, d: number) =>
 const linexp = (x: number, a: number, b: number, c: number, d: number) =>
   c * Math.pow(d / c, (Math.min(Math.max(x, a), b) - a) / (b - a));
 
+// iOS の消音スイッチがオンでも鳴らすため、音声の種類を「再生」にする（Safari 16.4+ の Audio Session API。
+// 既定の "auto" では Web Audio が効果音扱いになり、消音スイッチで無音になる）。非対応ブラウザでは何もしない
+function usePlaybackAudioSession(): void {
+  const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
+  if (session) session.type = "playback";
+}
+
 // パターン層（Strudel）と共有する連続値
 export const controlSignals = { charge: 0, energy: 0 };
 
@@ -120,10 +127,15 @@ export class CatharsisAudioEngine implements AudioEngine {
 
   private dropBus: GainNode | null = null; // 進行中のドロップ区間（次の溜めで止める）
 
+  // resume() は待たない。タッチ端末では pointerdown が「ユーザー操作」に数えられず（HTML の user activation は
+  // タッチだと pointerup / touchend から）、ゲートの pointerdown で resume() しても解決しない ─ スマホで無音だった原因。
+  // 配線は先に済ませ、再開は installUnlockListeners() が指を離した時・タップ時に行う
   async start(): Promise<void> {
-    if (this.ctx) { await this.ctx.resume(); return; }
+    if (this.ctx) { void this.ctx.resume(); return; }
+    usePlaybackAudioSession();
     this.ctx = new AudioContext();
-    await this.ctx.resume();
+    void this.ctx.resume();
+    this.installUnlockListeners();
     this.fallbackOrigin = this.ctx.currentTime;
 
     // ---- master: [fxIn → dry/reverb] + dryIn + strudelPump → master → duck → limiter → destination ----
@@ -168,15 +180,41 @@ export class CatharsisAudioEngine implements AudioEngine {
     this.isReady = true;
 
     // ---- パターン層（Strudel・オプショナル）─ 失敗しても本体は動く ----
+    // 音声が実際に動き出してから起動する（停止中の ctx では Strudel の初期化が進まない）
     const pattern = await import("./pattern");
-    void pattern.startPatternLayer(this.ctx, this.strudelPump, this.chord).then((clock) => {
-      this.clock = clock;
-      if (clock) this.setPatternChord = pattern.setPatternChord;
-    });
+    void this.whenRunning().then(() =>
+      pattern.startPatternLayer(this.ctx, this.strudelPump, this.chord).then((clock) => {
+        this.clock = clock;
+        if (clock) this.setPatternChord = pattern.setPatternChord;
+      }),
+    );
 
     // 種のシーケンサー（常時。種が無ければ何もしない）
     this.nextSeqTime = this.ctx.currentTime;
     window.setInterval(() => this.scheduleSeeds(), ROLL_TIMER_MS);
+  }
+
+  // 指を離した・タップ・キー操作のたびに、止まっていれば再開する。
+  // iOS は着信やバックグラウンド復帰で "interrupted" / "suspended" に落ちるので、外さずに常駐させる（判定だけの軽い処理）
+  private installUnlockListeners(): void {
+    const unlock = () => {
+      if (this.ctx.state !== "running") void this.ctx.resume();
+    };
+    for (const type of ["pointerup", "touchend", "click", "keydown"]) {
+      document.addEventListener(type, unlock, { capture: true, passive: true });
+    }
+  }
+
+  private whenRunning(): Promise<void> {
+    if (this.ctx.state === "running") return Promise.resolve();
+    return new Promise((resolve) => {
+      const onChange = () => {
+        if (this.ctx.state !== "running") return;
+        this.ctx.removeEventListener("statechange", onChange);
+        resolve();
+      };
+      this.ctx.addEventListener("statechange", onChange);
+    });
   }
 
   // ============ 拍グリッド（Strudel スケジューラと同じ時間軸） ============
