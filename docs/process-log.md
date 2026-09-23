@@ -299,6 +299,7 @@
 - 同名確認（Web 検索）: 同名のゲーム・アート作品は見当たらず。同名は米国の非営利向け CRM サービスと Roblox「Fisch」の効果名で、分野が異なる。商標データベース（USPTO / J-PlatPat）は未確認
 - 反映: タイトル画面・ページタイトル・meta description・OGP（日英併記）・README・音響エンジンの見出し・コンソール表記。副題「溜めて、放つ。/ Hold. Let go.」
 - タイトルロゴ（`docs/images/heartburst-logo.png`、README の先頭）: gpt-image-2 スキル（Codex 経由・バックエンドは未検証）で生成。1 回目の 16:9 キービジュアルは不採用（ユーザー: 「作るのはタイトルロゴ。文字だけを装飾、背景は透過、副題は不要」）。2 回目は**真っ黒な背景に発光ロゴだけ**を描かせ、手元で「明るさ = 不透明度」（alpha = max(R,G,B)、色は alpha で割り戻し）に変換して透過 PNG 化。生成モデルに直接透過を頼むより、光のにじみが半透明のまま残り、市松模様が描き込まれる事故もない。黒に戻したときの差は平均 1.3 / 最大 10（0〜255）。市松・作品背景・白の 3 背景に重ねた比較シートで 2 案を見比べてもらい B 案を採用
+- タイトル画面の文字もロゴ画像に置き換え（`web/public/heartburst-logo.webp`、WebP 透過・約 177KB、`h1` + alt="Heartburst"、width/height 指定でレイアウトのずれ防止、幅 min(86vw, 640px, 140dvh) でスマホ横でも収まる）
 - 右下のボタン: ユーザー指示で「?」を「声で溜める」と横並びに（`.word-ui-row`）
 - 旧名のまま残したもの（互換のため）: ネイティブ版のフォルダ名 `processing/CatharsisField/`（改名すると Processing スケッチとして開けない）、公開 URL と Worker 名 `catharsisfield`（リンク切れ防止）、localStorage のキー `catharsisfield.*`（利用者の記憶が消えるため）、過去の工程ログ・設計書
 

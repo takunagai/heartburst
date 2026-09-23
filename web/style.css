@@ -281,20 +281,15 @@ body {
 
 #overlay-title {
   margin: 0;
-  font-family:
-    "Helvetica Neue",
-    Arial,
-    "Hiragino Kaku Gothic ProN",
-    "Hiragino Sans",
-    "Noto Sans JP",
-    sans-serif;
-  font-size: clamp(1.75rem, 6vw, 3rem);
-  font-weight: bold;
-  letter-spacing: 0.14em;
-  color: #f5fdff;
-  text-shadow:
-    0 0 18px rgba(0, 229, 255, 0.6),
-    0 0 40px rgba(255, 43, 214, 0.3);
+  line-height: 0;
+}
+
+/* 幅は画面に合わせて伸縮。低い横長画面（スマホ横）でも他の文字と一緒に収まるよう高さ側からも上限をかける */
+#overlay-title img {
+  display: block;
+  width: min(86vw, 640px, 140dvh);
+  height: auto;
+  filter: drop-shadow(0 0 22px rgba(255, 43, 214, 0.22));
 }
 
 #overlay-text {
