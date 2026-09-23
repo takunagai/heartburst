@@ -37,22 +37,25 @@
     <div id="sketch-container"></div>
     <!-- 言葉を書いて、壊す（入力はブラウザ内だけで扱い、送信・保存しない） -->
     <div id="word-ui">
-      <!-- 遊び方（説明カードを開く）。初回の爆発後に一度だけ脈打つ -->
-      <button id="help-button" type="button" aria-haspopup="dialog" aria-label="遊び方を見る" data-i18n-attr="aria-label:help.aria">
-        <span aria-hidden="true">?</span>
-      </button>
-      <!-- 声で溜める（マイクの音量だけを使い、録音・送信しない）。https / localhost でのみ表示 -->
-      <button
-        id="voice-toggle"
-        type="button"
-        aria-pressed="false"
-        title="マイクの音量だけを使います（録音・送信はしません）"
-        data-i18n-attr="title:voice.title"
-        hidden
-      >
-        <span id="voice-label">声で溜める</span>
-        <span id="voice-meter" aria-hidden="true"></span>
-      </button>
+      <!-- 1 行目: 声で溜める と「?」を横並び（「?」は右端） -->
+      <div class="word-ui-row">
+        <!-- 声で溜める（マイクの音量だけを使い、録音・送信しない）。https / localhost でのみ表示 -->
+        <button
+          id="voice-toggle"
+          type="button"
+          aria-pressed="false"
+          title="マイクの音量だけを使います（録音・送信はしません）"
+          data-i18n-attr="title:voice.title"
+          hidden
+        >
+          <span id="voice-label">声で溜める</span>
+          <span id="voice-meter" aria-hidden="true"></span>
+        </button>
+        <!-- 遊び方（説明カードを開く）。初回の爆発後に一度だけ脈打つ -->
+        <button id="help-button" type="button" aria-haspopup="dialog" aria-label="遊び方を見る" data-i18n-attr="aria-label:help.aria">
+          <span aria-hidden="true">?</span>
+        </button>
+      </div>
       <button id="word-toggle" type="button" data-i18n="word.toggle">言葉を書いて、壊す</button>
       <form id="word-form" hidden>
         <input
