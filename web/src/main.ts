@@ -1189,6 +1189,11 @@ function drawProgressDots(p: p5): void {
 
 // ---- 言葉を書いて、壊す ----
 
+// iPhone / iPad（iPadOS はデスクトップ Safari を名乗るので、タッチ点数で見分ける）
+function isIos(): boolean {
+  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+}
+
 function initWordUi(): void {
   const toggle = document.getElementById("word-toggle");
   const form = document.getElementById("word-form") as HTMLFormElement | null;
@@ -1222,6 +1227,13 @@ function initWordUi(): void {
   bindInput(input);
   toggle.addEventListener("click", () => {
     if (!input) return;
+    if (isIos()) {
+      // iOS はページ内の入力欄で打った履歴が要素を差し替えても残り、端末を振ると「取り消す - 入力」を出す
+      // （振って解放と衝突 ─ 入力欄の差し替えでは消えなかった実機報告）。OS 標準の入力ダイアログなら履歴がページに残らない
+      const word = window.prompt("壊したい言葉（モヤモヤ）を書いてください", "")?.trim().slice(0, WORD_MAX_LENGTH);
+      if (word) formWord(word);
+      return;
+    }
     toggle.hidden = true;
     form.hidden = false;
     input.value = "";
