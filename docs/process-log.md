@@ -260,6 +260,14 @@
 - ハマり: agent-browser は既存デーモンがあると `--args` 付き起動が「Could not configure browser」で失敗する → `--session <新しい名前>` で別デーモンを立てる
 - 未検証: 実際の人の声での感度（-50〜-12dB の範囲・開始 0.35 が適切か）、iPhone での録音時の出力音量低下（iOS はマイク使用中に音声セッションが録音兼用になり、出力が小さくなることがある）
 
+## Phase 10: main へマージ・本番デプロイ（2026-09-24）
+
+- `feat/phase9-1-catharsis-core` を main へ早送りマージ（リモート未設定のため push なし）→ `pnpm build` → `wrangler deploy`
+- **workers.dev のサブドメインが変わっていた**: デプロイ先の表示が旧 `catharsisfield.autumn-wave-9579.workers.dev` でなく `catharsisfield.nagai-shouten.workers.dev`。旧 URL は応答なし（curl 000）。同じ Worker のデプロイ履歴（2026-07-13〜）が続いているので、アカウントの workers.dev サブドメイン自体が変わったと判断。index.html の og:url / og:image を新 URL に直して再デプロイ
+- 本番 E2E（agent-browser + CDP の本物のタッチ、390×844）: タッチで音声 running・Strudel 起動（https なので AudioWorklet も通る）・溜め 0.59 / 解放 0.58・「声で溜める」表示・8000 粒子・エラー 0
+- ロールバック先: 旧版 `3240307b`（2026-07-13）。今回 `94ad0381`
+- 学び: デプロイ前に `wrangler deployments list` で既存 Worker の所在を確かめ、デプロイ後は表示された URL と OGP の URL が一致しているかを必ず見る（サブドメインは外部要因で変わる）
+
 ## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）
