@@ -48,6 +48,7 @@ cd web && pnpm install && pnpm dev
 | 強い解放を 7 回 | 大団円。積もった痕跡が一斉に弾け、場面（配色）が移る |
 | 「声で溜める」をオン | 叫ぶと画面中央で溜まり、声を止めると解放（長押し中は声で加速）。マイクは音量の計測だけに使う（https / localhost のみ） |
 | スマホを振る（溜め中） | その向きへ解放 |
+| `?` キー / 右下の「?」/ タイトルの How to Play | 遊び方（日英。ブラウザの言語で自動選択、トグルで切り替え） |
 | `d` キー | デバッグ HUD |
 
 チューニング定数は `web/src/tuning.ts`（演出）、`web/src/music.ts`（音程・コード進行）、`web/src/scenes.ts`（場面）、`web/src/audio/catharsis-engine.ts` 冒頭（音響）。

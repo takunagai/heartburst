@@ -14,10 +14,11 @@
 
     <!-- OGP -->
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="CatharsisField ─ 溜めて、解放する。" />
+    <!-- OGP は言語で切り替えられない（クローラーはスクリプトを実行しない）ので日英併記 -->
+    <meta property="og:title" content="CatharsisField ─ 溜めて、解放する。 / Charge. Release." />
     <meta
       property="og:description"
-      content="溜めて、解放する。カタルシスを体感するインタラクティブ・アート ─ CatharsisField"
+      content="溜めて、解放する。カタルシスを体感するインタラクティブ・アート / Charge it up, then let it all go. An interactive art piece about catharsis."
     />
     <meta property="og:url" content="https://catharsisfield.nagai-shouten.workers.dev/" />
     <meta property="og:image" content="https://catharsisfield.nagai-shouten.workers.dev/og-image.jpg" />
@@ -36,18 +37,23 @@
     <div id="sketch-container"></div>
     <!-- 言葉を書いて、壊す（入力はブラウザ内だけで扱い、送信・保存しない） -->
     <div id="word-ui">
+      <!-- 遊び方（説明カードを開く）。初回の爆発後に一度だけ脈打つ -->
+      <button id="help-button" type="button" aria-haspopup="dialog" aria-label="遊び方を見る" data-i18n-attr="aria-label:help.aria">
+        <span aria-hidden="true">?</span>
+      </button>
       <!-- 声で溜める（マイクの音量だけを使い、録音・送信しない）。https / localhost でのみ表示 -->
       <button
         id="voice-toggle"
         type="button"
         aria-pressed="false"
         title="マイクの音量だけを使います（録音・送信はしません）"
+        data-i18n-attr="title:voice.title"
         hidden
       >
         <span id="voice-label">声で溜める</span>
         <span id="voice-meter" aria-hidden="true"></span>
       </button>
-      <button id="word-toggle" type="button">言葉を書いて、壊す</button>
+      <button id="word-toggle" type="button" data-i18n="word.toggle">言葉を書いて、壊す</button>
       <form id="word-form" hidden>
         <input
           id="word-input"
@@ -56,18 +62,126 @@
           autocomplete="off"
           enterkeyhint="done"
           aria-label="壊したい言葉"
+          data-i18n-attr="placeholder:word.placeholder;aria-label:word.aria"
         />
       </form>
     </div>
     <p id="scene-caption" aria-live="polite"></p>
     <div id="overlay">
       <div id="overlay-particles" aria-hidden="true"></div>
+      <!-- 言語トグル（押しても作品は始まらない） -->
+      <div class="lang-toggle overlay-lang" role="group" aria-label="言語" data-i18n-attr="aria-label:lang.group">
+        <button type="button" data-lang-option="ja" aria-pressed="true">日本語</button>
+        <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+      </div>
       <div id="overlay-content">
         <p id="overlay-title">CatharsisField</p>
-        <p id="overlay-text">長押しで溜めて、離して解き放つ</p>
-        <p id="overlay-note">音が鳴ります・音量にご注意ください</p>
+        <p id="overlay-text" data-i18n="overlay.text">長押しで溜めて、離して解き放つ</p>
+        <p id="overlay-note" data-i18n="overlay.note">音が鳴ります・音量にご注意ください</p>
+        <!-- 遊び方（押しても作品は始まらない。読んでからタップで開始） -->
+        <button id="overlay-howto" type="button" aria-haspopup="dialog" data-i18n="overlay.howto">How to Play</button>
       </div>
     </div>
+
+    <!-- 遊び方（ユーザーマニュアル）。1 枚・スクロール無しを目標に、横長の低い画面では 2 列 -->
+    <dialog id="manual" aria-labelledby="manual-title">
+      <div class="manual-card">
+        <header class="manual-header">
+          <h2 id="manual-title" data-i18n="manual.title">遊び方</h2>
+          <div class="lang-toggle" role="group" aria-label="言語" data-i18n-attr="aria-label:lang.group">
+            <button type="button" data-lang-option="ja" aria-pressed="true">日本語</button>
+            <button type="button" data-lang-option="en" aria-pressed="false">EN</button>
+          </div>
+          <button class="manual-close" type="button" aria-label="閉じる" data-i18n-attr="aria-label:manual.close">
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <div class="manual-body">
+          <section class="manual-section manual-basics">
+            <h3 data-i18n="manual.basics">基本</h3>
+            <ul>
+              <li>
+                <!-- 溜める: 周りの光が中心へ集まり、進行の輪が満ちる -->
+                <svg class="anim anim-hold" viewBox="0 0 56 40" aria-hidden="true">
+                  <circle class="ring-track" cx="28" cy="20" r="14" />
+                  <circle class="ring-fill" cx="28" cy="20" r="14" />
+                  <circle class="core" cx="28" cy="20" r="2.5" />
+                  <g class="dots">
+                    <circle cx="28" cy="20" r="1.4" style="--a: 0deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 60deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 120deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 180deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 240deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 300deg" />
+                  </g>
+                </svg>
+                <p><strong data-i18n="manual.hold">長押しで溜める</strong><span data-i18n="manual.hold.sub">長いほど強い</span></p>
+              </li>
+              <li>
+                <!-- 爆発: 中心が光り、輪が広がって光が飛び散る -->
+                <svg class="anim anim-release" viewBox="0 0 56 40" aria-hidden="true">
+                  <circle class="shock" cx="28" cy="20" r="6" />
+                  <circle class="flash" cx="28" cy="20" r="6" />
+                  <g class="dots">
+                    <circle cx="28" cy="20" r="1.4" style="--a: 20deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 80deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 140deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 200deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 260deg" />
+                    <circle cx="28" cy="20" r="1.4" style="--a: 320deg" />
+                  </g>
+                </svg>
+                <p><strong data-i18n="manual.release">離すと爆発</strong><span data-i18n="manual.release.sub">一瞬の静寂のあとに</span></p>
+              </li>
+              <li>
+                <!-- タップ: 波紋が出て、小さな星が残って瞬く -->
+                <svg class="anim anim-tap" viewBox="0 0 56 40" aria-hidden="true">
+                  <circle class="ripple" cx="28" cy="20" r="4" />
+                  <path class="star" d="M28 13 L28 27 M21 20 L35 20" />
+                  <circle class="star-core" cx="28" cy="20" r="2" />
+                </svg>
+                <p><strong data-i18n="manual.tap">短くタップ</strong><span data-i18n="manual.tap.sub">音が鳴り、光の種が残る</span></p>
+              </li>
+            </ul>
+          </section>
+
+          <section class="manual-section manual-more">
+            <h3 data-i18n="manual.more">もっと遊ぶ</h3>
+            <ul>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-critical" /></svg><span data-i18n="manual.critical">金の輪が光る瞬間に離す → クリティカル</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-overload" /></svg><span data-i18n="manual.overload">満タンのまま押し続ける → 暴発</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-flick" /></svg><span data-i18n="manual.flick">離す瞬間に弾く → その方向へ飛ぶ</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-chain" /></svg><span data-i18n="manual.chain">爆発で種を巻き込む → 連鎖して旋律に</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-finale" /></svg><span data-i18n="manual.finale">強い解放 7 回（画面下の点）→ 大団円</span></li>
+            </ul>
+          </section>
+
+          <section class="manual-section manual-extras">
+            <h3 data-i18n="manual.extras">右下のボタン・スマホ</h3>
+            <ul>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-word" /></svg><span data-i18n="manual.word">言葉を書いて、壊す ─ 言葉を粒子にして砕く</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-voice" /></svg><span data-i18n="manual.voice">声で溜める ─ 叫んで溜め、黙ると爆発</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="#icon-shake" /></svg><span data-i18n="manual.shake">溜めながらスマホを振る → 解放</span></li>
+            </ul>
+          </section>
+        </div>
+
+        <p class="manual-footer" data-i18n="manual.footer">音が鳴ります ・ 入力した言葉と声は送信・保存しません</p>
+      </div>
+    </dialog>
+
+    <!-- 説明カードの線画アイコン（16×16、線は currentColor） -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <symbol id="icon-critical" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" /><path d="M8 1v2.5M8 12.5V15M1 8h2.5M12.5 8H15" /></symbol>
+      <symbol id="icon-overload" viewBox="0 0 16 16"><path d="M9.5 1.5 4 9h4l-1.5 5.5L12 7H8z" /></symbol>
+      <symbol id="icon-flick" viewBox="0 0 16 16"><circle cx="4" cy="12" r="2" /><path d="M5.5 10.5 13 3M8.5 3H13v4.5" /></symbol>
+      <symbol id="icon-chain" viewBox="0 0 16 16"><circle cx="3" cy="11" r="1.8" /><circle cx="8" cy="5" r="1.8" /><circle cx="13" cy="10" r="1.8" /><path d="M4.2 9.6 6.8 6.4M9.6 6 11.6 8.6" /></symbol>
+      <symbol id="icon-finale" viewBox="0 0 16 16"><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3M3.4 3.4l2.1 2.1M10.5 10.5l2.1 2.1M3.4 12.6l2.1-2.1M10.5 5.5l2.1-2.1" /><circle cx="8" cy="8" r="1.6" /></symbol>
+      <symbol id="icon-word" viewBox="0 0 16 16"><path d="M3 3.5h10M8 3.5V13M5.5 13h5" /></symbol>
+      <symbol id="icon-voice" viewBox="0 0 16 16"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" /><path d="M3 8a5 5 0 0 0 10 0M8 13v2" /></symbol>
+      <symbol id="icon-shake" viewBox="0 0 16 16"><rect x="5" y="2" width="6" height="12" rx="1.2" /><path d="M2.5 5.5v5M13.5 5.5v5" /></symbol>
+    </svg>
     <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

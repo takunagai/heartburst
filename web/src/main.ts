@@ -106,6 +106,8 @@ import { createAudioEngine, isVoiceSupported } from "./audio/engine";
 import type { BurstStyle } from "./audio/engine";
 import { CHORD_PROGRESSION, midiHue, tapToMidi } from "./music";
 import { FINALE_RELEASES, SCENES } from "./scenes";
+import { initI18n, onLangChange, t } from "./i18n";
+import { hintHelpOnce, initManual, isManualOpen } from "./manual";
 
 const audio = createAudioEngine();
 // チューニング・検証用に露出（本番でも害はない読み取り専用ハンドル）
@@ -320,6 +322,8 @@ function updateState(p: p5): void {
     if (now >= hitstopEndMillis) {
       state = "decay";
       decayStartMillis = now;
+      // 最初の爆発のあと、右下のボタン群が戻ってきた頃に「?」を一度だけ脈打たせる
+      window.setTimeout(hintHelpOnce, 1500);
       if (isFinalePending) {
         isFinalePending = false;
         advanceScene();
@@ -924,6 +928,16 @@ function handleDeviceMotion(p: p5, event: DeviceMotionEvent): void {
 }
 
 // iOS 13+ はモーションセンサーの利用にユーザー操作起点の許可要求が必要
+// 溜め〜着弾の間は右下のボタン群を薄くする（CSS: body.is-charging）。状態が変わったときだけ DOM に触る
+let isChargingClassOn = false;
+
+function updateChargingClass(): void {
+  const isOn = state === "charging" || state === "inhale" || state === "impact";
+  if (isOn === isChargingClassOn) return;
+  isChargingClassOn = isOn;
+  document.body.classList.toggle("is-charging", isOn);
+}
+
 // ---- 声で溜める ----
 
 // 毎フレーム: 声量を読み、声だけの溜めの開始（声が続いたら）と解放（声が止んだら）を判定する
@@ -978,20 +992,25 @@ function initVoiceUi(): void {
       isVoiceEnabled = false;
       voiceLevel = 0;
       updateVoiceMeter(0);
-      label.textContent = "声で溜める";
+      label.textContent = t("voice.off");
       toggle.setAttribute("aria-pressed", "false");
       return;
     }
-    label.textContent = "マイクを準備中";
+    label.textContent = t("voice.preparing");
     const status = await audio.enableVoice();
     if (status === "on") {
       isVoiceEnabled = true;
-      label.textContent = "声で溜める：オン";
+      label.textContent = t("voice.on");
       toggle.setAttribute("aria-pressed", "true");
     } else {
-      label.textContent = status === "denied" ? "マイクが許可されていません" : "マイクを使えません";
-      window.setTimeout(() => (label.textContent = "声で溜める"), 2600);
+      label.textContent = t(status === "denied" ? "voice.denied" : "voice.unavailable");
+      window.setTimeout(() => (label.textContent = t(isVoiceEnabled ? "voice.on" : "voice.off")), 2600);
     }
+  });
+  // 言語の切り替えに追従（状態表示は動的なので data-i18n では差し替えない）
+  label.textContent = t("voice.off");
+  onLangChange(() => {
+    label.textContent = t(isVoiceEnabled ? "voice.on" : "voice.off");
   });
 }
 
@@ -1063,7 +1082,7 @@ function advanceScene(): void {
   sceneFrom = currentScene();
   sceneIndex++;
   sceneBlend = 0;
-  showCaption(currentScene().caption);
+  showCaption(t(currentScene().caption));
 }
 
 function showCaption(text: string): void {
@@ -1230,7 +1249,7 @@ function initWordUi(): void {
     if (isIos()) {
       // iOS はページ内の入力欄で打った履歴が要素を差し替えても残り、端末を振ると「取り消す - 入力」を出す
       // （振って解放と衝突 ─ 入力欄の差し替えでは消えなかった実機報告）。OS 標準の入力ダイアログなら履歴がページに残らない
-      const word = window.prompt("壊したい言葉（モヤモヤ）を書いてください", "")?.trim().slice(0, WORD_MAX_LENGTH);
+      const word = window.prompt(t("word.prompt"), "")?.trim().slice(0, WORD_MAX_LENGTH);
       if (word) formWord(word);
       return;
     }
@@ -1591,6 +1610,7 @@ const sketch = (p: p5) => {
     updatePerfAutoScale(p);
     updateVoice(p, p.millis());
     updateState(p);
+    updateChargingClass();
     updateSecondaryBursts(p, p.millis());
     updateSeeds(p);
     updateScene();
@@ -1739,6 +1759,7 @@ const sketch = (p: p5) => {
 
   p.keyPressed = () => {
     if (document.activeElement instanceof HTMLInputElement) return; // 言葉の入力中はショートカット無効
+    if (isManualOpen()) return; // 説明カードを開いている間も無効
     if (p.key === "d" || p.key === "D") {
       showHud = !showHud;
     }
@@ -1769,6 +1790,8 @@ function initDiagnostics(): void {
 }
 
 initDiagnostics();
+initI18n();
+initManual();
 
 const container = document.getElementById("sketch-container");
 if (!container) {
