@@ -73,9 +73,15 @@ const linexp = (x: number, a: number, b: number, c: number, d: number) =>
 // 既定の "auto" では Web Audio が効果音扱いになり、消音スイッチで無音になる）。
 // 使えなければ false（非対応 iOS、または https でない ─ LAN の http で試すと使えない）
 function usePlaybackAudioSession(): boolean {
+  return setAudioSessionType("playback");
+}
+
+// "playback" のままだと iOS はマイクの取得を拒否する（本番 https の iPhone で「マイクが許可されていません」になった）。
+// マイクを使う間だけ "play-and-record" に切り替え、やめたら "playback" に戻す
+function setAudioSessionType(type: "playback" | "play-and-record"): boolean {
   const session = (navigator as unknown as { audioSession?: { type: string } }).audioSession;
   if (!session) return false;
-  session.type = "playback";
+  session.type = type;
   return true;
 }
 
@@ -286,6 +292,7 @@ export class CatharsisAudioEngine implements AudioEngine {
     if (this.voice) return "on";
     if (!this.isReady || !isVoiceSupported()) return "unsupported";
     let stream: MediaStream;
+    if (this.hasAudioSession) setAudioSessionType("play-and-record");
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         // エコーキャンセルで自分の爆発音を拾いにくくする。自動ゲインは声の強弱を潰すので切る
@@ -293,6 +300,7 @@ export class CatharsisAudioEngine implements AudioEngine {
       });
     } catch (error) {
       this.lastError = `mic: ${String(error)}`;
+      if (this.hasAudioSession) setAudioSessionType("playback");
       return "denied";
     }
     const source = this.ctx.createMediaStreamSource(stream);
@@ -314,6 +322,7 @@ export class CatharsisAudioEngine implements AudioEngine {
     voice.stream.getTracks().forEach((track) => track.stop());
     voice.source.disconnect();
     voice.analyser.disconnect();
+    if (this.hasAudioSession) setAudioSessionType("playback"); // 消音スイッチ中も鳴る状態へ戻す
   }
 
   // 声量 0..1: RMS を dB にして VOICE_FLOOR_DB〜VOICE_CEIL_DB を 0..1 に写す。立ち上がりは速く、減衰はゆっくり

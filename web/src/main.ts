@@ -1192,16 +1192,36 @@ function drawProgressDots(p: p5): void {
 function initWordUi(): void {
   const toggle = document.getElementById("word-toggle");
   const form = document.getElementById("word-form") as HTMLFormElement | null;
-  const input = document.getElementById("word-input") as HTMLInputElement | null;
+  let input = document.getElementById("word-input") as HTMLInputElement | null;
   if (!toggle || !form || !input) return;
-  input.maxLength = WORD_MAX_LENGTH;
 
+  const bindInput = (element: HTMLInputElement) => {
+    element.maxLength = WORD_MAX_LENGTH;
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") close();
+    });
+    element.addEventListener("blur", () => {
+      if (!element.value.trim()) close();
+    });
+  };
+
+  // 閉じるたびに入力欄を新しい要素に差し替える。iOS は入力の履歴が残っていると、
+  // 端末を振ったときに「取り消す - 入力」を出す（振って解放と衝突した ─ 実機報告）
   const close = () => {
+    if (form.hidden || !input) return; // 差し替えに伴う blur からの再入を防ぐ
     form.hidden = true;
     toggle.hidden = false;
     input.blur();
+    const fresh = input.cloneNode(false) as HTMLInputElement;
+    fresh.value = "";
+    input.replaceWith(fresh);
+    input = fresh;
+    bindInput(fresh);
   };
+
+  bindInput(input);
   toggle.addEventListener("click", () => {
+    if (!input) return;
     toggle.hidden = true;
     form.hidden = false;
     input.value = "";
@@ -1209,15 +1229,9 @@ function initWordUi(): void {
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const word = input.value.trim();
+    const word = input?.value.trim() ?? "";
     close();
     if (word) formWord(word);
-  });
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") close();
-  });
-  input.addEventListener("blur", () => {
-    if (!input.value.trim()) close();
   });
 }
 
