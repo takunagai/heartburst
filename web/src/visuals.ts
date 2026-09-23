@@ -172,12 +172,28 @@ export class Particle {
     this.baseSize = p.random(1.4, 3.0);
     this.noiseOffset = p.random(1000.0);
 
-    // シアン〜マゼンタの個体差
+    // シアン〜マゼンタの個体差（彩度・明度は 64 段の表から引く ─ 粒子ごとに p5 の色計算をすると 8000 個で重い）
     this.paletteT = p.random(1.0);
-    const c = p.lerpColor(p.color(COLOR_CYAN_HEX), p.color(COLOR_MAGENTA_HEX), this.paletteT);
-    this.satVal = p.saturation(c);
-    this.briBase = p.brightness(c);
+    const table = Particle.paletteTable(p);
+    const [satVal, briBase] = table[Math.min(Math.floor(this.paletteT * table.length), table.length - 1)];
+    this.satVal = satVal;
+    this.briBase = briBase;
     this.spectrumOffset = (Math.random() - 0.5) * BURST_HUE_SPREAD;
+  }
+
+  private static paletteCache: [number, number][] | null = null;
+
+  // 旧実装（粒子ごとの p5.lerpColor）と同じ値を 64 段だけ計算して使い回す
+  private static paletteTable(p: p5): [number, number][] {
+    if (!Particle.paletteCache) {
+      const from = p.color(COLOR_CYAN_HEX);
+      const to = p.color(COLOR_MAGENTA_HEX);
+      Particle.paletteCache = Array.from({ length: 64 }, (_, i) => {
+        const c = p.lerpColor(from, to, (i + 0.5) / 64);
+        return [p.saturation(c), p.brightness(c)] as [number, number];
+      });
+    }
+    return Particle.paletteCache;
   }
 
   // 住む範囲（全粒子で共有。main が起動時とリサイズ時に setDomain で更新）
@@ -617,30 +633,24 @@ export class Shockwave {
 }
 
 // ------------------------------------------------------------
-// buildVignette ─ 画面端を暗くする放射グラデーションを 1 回だけピクセル単位で
-// 生成する（CatharsisField.pde buildVignette()）。draw() では image() で
-// 重ねるだけにして毎フレームコストを避ける。ウィンドウリサイズ時は
-// 呼び出し側（main.ts）が windowResized で再生成する。
+// buildVignette ─ 画面端を暗くする放射グラデーション（VIGNETTE_INNER から外周へ線形に黒）。
+// 旧実装は全ピクセルで p5 の map/constrain を回しており、起動時に数百 ms 止まっていたため
+// canvas の放射グラデーションで一度に描く。描画側は drawImage + globalAlpha で重ねる
+// （p5 の tint は使わない）。リサイズ時は main が作り直す。
 // ------------------------------------------------------------
-export function buildVignette(p: p5, w: number, h: number): p5.Image {
-  const img = p.createImage(w, h);
-  img.loadPixels();
+export function buildVignette(w: number, h: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
   const cx = w / 2;
   const cy = h / 2;
   const maxDist = Math.hypot(cx, cy);
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const d = Math.hypot(x - cx, y - cy) / maxDist;
-      const a = p.constrain(p.map(d, VIGNETTE_INNER, 1.0, 0, 255), 0, 255);
-      const idx = (y * w + x) * 4;
-      img.pixels[idx] = 0;
-      img.pixels[idx + 1] = 0;
-      img.pixels[idx + 2] = 0;
-      img.pixels[idx + 3] = a;
-    }
-  }
-
-  img.updatePixels();
-  return img;
+  const gradient = ctx.createRadialGradient(cx, cy, maxDist * VIGNETTE_INNER, cx, cy, maxDist);
+  gradient.addColorStop(0, "rgba(0,0,0,0)");
+  gradient.addColorStop(1, "rgba(0,0,0,1)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, w, h);
+  return canvas;
 }

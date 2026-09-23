@@ -23,6 +23,13 @@ export interface StrudelClock {
   seconds_at_cps_change: number | undefined;
 }
 
+// Strudel の読み込み・パースだけ先に済ませる（初期化はしない。AudioContext 無しでも副作用なし）
+export function preloadPatternLayer(): void {
+  import("@strudel/web").catch(() => {
+    // 先読みの失敗は無視（本番の起動時にもう一度読み込む）
+  });
+}
+
 // Strudel（AGPLv3）は動的 import ─ クリックゲート後に初めてロードする。
 // destination: Strudel の出力の接続先（音響エンジンのマスター系統。無音の間・ポンピングを一括で掛けるため）
 export async function startPatternLayer(

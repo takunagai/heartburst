@@ -238,7 +238,7 @@ let bgHue = 0;
 let bgSat = 0;
 let bgBri = 0;
 
-let vignetteImg: p5.Image;
+let vignetteImg: HTMLCanvasElement;
 
 // グロー: 縮小キャンバスへ本体をぼかして写し、CSS で拡大 + screen 合成で重ねる。
 // 本体キャンバスへ加算し直すとトレイルと帰還ループを作って白飽和するため、別レイヤーにする
@@ -1369,7 +1369,7 @@ const sketch = (p: p5) => {
     particles = Array.from({ length: PARTICLE_COUNT }, () => new Particle(p));
     shockwaves = Array.from({ length: MAX_SHOCKWAVES }, () => new Shockwave(p));
 
-    vignetteImg = buildVignette(p, p.width, p.height);
+    vignetteImg = buildVignette(p.width, p.height);
     createGlowLayer(canvasRenderer.elt.parentElement as HTMLElement);
     createResidueLayer();
     initWordUi();
@@ -1403,6 +1403,8 @@ const sketch = (p: p5) => {
     window.addEventListener("devicemotion", (event) => handleDeviceMotion(p, event));
 
     initOverlayGate(p);
+    // 導入画面を読んでいる間に Strudel を先読み（最初の数フレームの描画と競合しないよう少し遅らせる）
+    window.setTimeout(() => audio.preload(), 800);
 
     // 検証用の読み取り専用スナップショット（E2E で状態遷移・スローモーションを数値確認する）
     (window as unknown as { __catharsisDebug: () => object }).__catharsisDebug = () => ({
@@ -1434,7 +1436,7 @@ const sketch = (p: p5) => {
   p.windowResized = () => {
     p.resizeCanvas(window.innerWidth, window.innerHeight);
     Particle.setDomain(p.width, p.height); // 円の外に出た粒子は次のフレームで円内へ戻る
-    vignetteImg = buildVignette(p, p.width, p.height);
+    vignetteImg = buildVignette(p.width, p.height);
     resizeGlowLayer();
     resizeResidueLayer();
   };
@@ -1560,12 +1562,10 @@ const sketch = (p: p5) => {
     // 溜め〜吸い込み中は画面端をヴィネットで暗くする（level に応じて濃くなる）
     const vignetteLevel = state === "charging" ? level : state === "inhale" ? releaseLevel : 0;
     if (vignetteLevel > 0.001) {
-      p.push();
-      p.colorMode(p.RGB, 255);
-      p.tint(255, vignetteLevel * VIGNETTE_MAX_ALPHA);
-      p.image(vignetteImg, 0, 0);
-      p.noTint();
-      p.pop();
+      directCtx.save();
+      directCtx.globalAlpha = (vignetteLevel * VIGNETTE_MAX_ALPHA) / 255; // VIGNETTE_MAX_ALPHA は 0-255 レンジ
+      directCtx.drawImage(vignetteImg, 0, 0);
+      directCtx.restore();
     }
 
     // フラッシュは画面全体に BLEND で重ねる（ADD だと白飽和が消えにくい）

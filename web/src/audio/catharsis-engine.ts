@@ -269,6 +269,11 @@ export class CatharsisAudioEngine implements AudioEngine {
   }
 
   // 実機（特に iOS）で鳴らないときの切り分け用。?debug で画面に出す
+  // 導入画面の表示中に Strudel を先読みする（タップ後の読み込み・パースの停止を前倒しで済ませる）
+  preload(): void {
+    void import("./pattern").then((pattern) => pattern.preloadPatternLayer());
+  }
+
   getDiagnostics(): Record<string, string> {
     return {
       secureContext: String(window.isSecureContext),
@@ -954,12 +959,32 @@ export class CatharsisAudioEngine implements AudioEngine {
     return `${midi}:${decaySec}`;
   }
 
+  // 45 音を一度に合成するとタップ直後に数百 ms 止まる（CPU 4 倍スロットルで 353ms を実測）。
+  // 1 音ずつ描画の合間に合成し、使う順（タップ音 → 和音・シャワー → 種）に並べる。
+  // 未合成の音が要求されたら pluck() がその場で合成する（取りこぼさない）
   private buildPluckBank(): void {
-    for (const m of SHOWER_MIDIS) this.pluckBank.set(this.pluckKey(m, SHOWER_DECAY), this.renderKarplusStrong(midicps(m), SHOWER_DECAY));
-    for (const m of TAP_MIDIS) {
-      this.pluckBank.set(this.pluckKey(m, TAP_DECAY), this.renderKarplusStrong(midicps(m), TAP_DECAY));
-      this.pluckBank.set(this.pluckKey(m, SEED_DECAY), this.renderKarplusStrong(midicps(m), SEED_DECAY));
+    const queue: [number, number][] = [
+      ...TAP_MIDIS.map((m): [number, number] => [m, TAP_DECAY]),
+      ...SHOWER_MIDIS.map((m): [number, number] => [m, SHOWER_DECAY]),
+      ...TAP_MIDIS.map((m): [number, number] => [m, SEED_DECAY]),
+    ];
+    const step = () => {
+      const next = queue.shift();
+      if (!next) return;
+      this.ensurePluck(next[0], next[1]);
+      window.setTimeout(step, 0);
+    };
+    step();
+  }
+
+  private ensurePluck(midi: number, decaySec: number): AudioBuffer {
+    const key = this.pluckKey(midi, decaySec);
+    let buffer = this.pluckBank.get(key);
+    if (!buffer) {
+      buffer = this.renderKarplusStrong(midicps(midi), decaySec);
+      this.pluckBank.set(key, buffer);
     }
+    return buffer;
   }
 
   // 古典 KS: ノイズ 1 周期のリングバッファを「隣接平均 × フィードバック」で巡回
@@ -972,20 +997,20 @@ export class CatharsisAudioEngine implements AudioEngine {
     const ring = new Float32Array(period);
     for (let i = 0; i < period; i++) ring[i] = Math.random() * 2 - 1;
     const feedback = Math.pow(0.001, period / sr / decaySec); // decaySec 後 -60dB
+    const gain = feedback * 0.5;
     let idx = 0;
     for (let i = 0; i < len; i++) {
+      const nextIdx = idx + 1 === period ? 0 : idx + 1; // 剰余演算を避ける（サンプル数ぶん回るホットループ）
       const cur = ring[idx];
-      const next = ring[(idx + 1) % period];
       out[i] = cur;
-      ring[idx] = feedback * 0.5 * (cur + next); // 平均 = 1 次 LPF（弦の高域減衰）
-      idx = (idx + 1) % period;
+      ring[idx] = gain * (cur + ring[nextIdx]); // 平均 = 1 次 LPF（弦の高域減衰）
+      idx = nextIdx;
     }
     return buf;
   }
 
   private pluck(midi: number, amp: number, pan: number, decaySec: number, when?: number): void {
-    const buf = this.pluckBank.get(this.pluckKey(midi, decaySec));
-    if (!buf) return;
+    const buf = this.ensurePluck(midi, decaySec);
     const t = when ?? this.ctx.currentTime;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;

@@ -49,6 +49,7 @@ export interface AudioEngine {
   setEnergy(energy: number): void; // decay 中 1→0
   getAmp(): number; // マスター振幅 0..1
   getDiagnostics(): Record<string, string>; // 実機で鳴らないときの切り分け用（?debug で表示）
+  preload(): void; // 導入画面の表示中に重い読み込みを前倒しする
 }
 
 export class NoopAudioEngine implements AudioEngine {
@@ -83,6 +84,7 @@ export class NoopAudioEngine implements AudioEngine {
   getDiagnostics(): Record<string, string> {
     return { engine: "muted (?mute)" };
   }
+  preload(): void {}
 }
 
 import { CatharsisAudioEngine } from "./catharsis-engine";
