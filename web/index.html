@@ -34,6 +34,21 @@
   </head>
   <body>
     <div id="sketch-container"></div>
+    <!-- 言葉を書いて、壊す（入力はブラウザ内だけで扱い、送信・保存しない） -->
+    <div id="word-ui">
+      <button id="word-toggle" type="button">言葉を書いて、壊す</button>
+      <form id="word-form" hidden>
+        <input
+          id="word-input"
+          type="text"
+          placeholder="モヤモヤを書いて Enter"
+          autocomplete="off"
+          enterkeyhint="done"
+          aria-label="壊したい言葉"
+        />
+      </form>
+    </div>
+    <p id="scene-caption" aria-live="polite"></p>
     <div id="overlay">
       <div id="overlay-particles" aria-hidden="true"></div>
       <div id="overlay-content">

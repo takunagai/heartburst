@@ -42,6 +42,106 @@ body {
   opacity: 0.35;
 }
 
+/* 言葉を書いて、壊す ─ 右下の控えめな入口。導入ゲートを抜けるまで隠す */
+#word-ui {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  z-index: 5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s ease 1.2s;
+}
+
+#word-ui.is-ready {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+#word-toggle,
+#word-input {
+  font-family:
+    "Helvetica Neue",
+    Arial,
+    "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans",
+    "Noto Sans JP",
+    sans-serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  color: rgba(232, 251, 255, 0.85);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(232, 251, 255, 0.22);
+  border-radius: 999px;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+#word-toggle {
+  padding: 0.55rem 1rem;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease;
+}
+
+#word-toggle:hover,
+#word-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.6);
+  outline: none;
+}
+
+#word-input {
+  width: min(72vw, 320px);
+  padding: 0.6rem 1rem;
+  font-size: 16px; /* iOS の入力時ズームを防ぐため 16px 以上 */
+  outline: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#word-input:focus {
+  border-color: rgba(0, 229, 255, 0.7);
+  box-shadow: 0 0 18px rgba(0, 229, 255, 0.25);
+}
+
+/* 場面が移るときに浮かぶ一文 */
+#scene-caption {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 38%;
+  z-index: 4;
+  margin: 0;
+  text-align: center;
+  pointer-events: none;
+  font-family:
+    "Helvetica Neue",
+    Arial,
+    "Hiragino Kaku Gothic ProN",
+    "Hiragino Sans",
+    "Noto Sans JP",
+    sans-serif;
+  font-size: clamp(1.4rem, 5vw, 2.6rem);
+  font-weight: bold;
+  letter-spacing: 0.4em;
+  color: #fffaf0;
+  text-shadow:
+    0 0 20px rgba(255, 220, 160, 0.7),
+    0 0 48px rgba(255, 120, 200, 0.35);
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 1.4s ease,
+    transform 1.4s ease;
+}
+
+#scene-caption.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 /* 導入オーバーレイ ─ 初回 pointerdown で AudioContext.resume() を通しつつ
    そのまま 1 回目のチャージへ繋げる（クリックゲート制約を演出に変換） */
 #overlay {

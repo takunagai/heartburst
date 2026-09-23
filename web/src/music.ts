@@ -44,9 +44,9 @@ export interface Chord {
 
 export const CHORD_PROGRESSION: Chord[] = [
   { name: "Cm", root: 0, tones: [0, 3, 7, 10], hueShift: 0 },
-  { name: "Ab", root: 8, tones: [8, 12, 15, 19], hueShift: 28 },
-  { name: "Eb", root: 3, tones: [3, 7, 10, 14], hueShift: -38 },
-  { name: "Bb", root: 10, tones: [10, 14, 17, 21], hueShift: 55 },
+  { name: "Ab", root: 8, tones: [8, 12, 15, 19], hueShift: 14 },
+  { name: "Eb", root: 3, tones: [3, 7, 10, 14], hueShift: -18 },
+  { name: "Bb", root: 10, tones: [10, 14, 17, 21], hueShift: 24 },
 ];
 
 // 残響シャワー用の音域（C5 以上の自然短音階 2 オクターブ。どのコードの構成音もこの中に入る）

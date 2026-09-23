@@ -11,6 +11,9 @@
 // Phase 9-2:
 //   - 段階チャージの渦、オーバーチャージの不安定化と赤熱、カーソルを避ける idle 粒子
 //   - 爆発の種類別の配色（クリティカル = 金 / 暴発 = 赤）とスリングショットの指向性インパルス
+// Phase 9-4:
+//   - 場面ごとの配色（粒子は 2 色の間の個体差 paletteT で色相を決める）
+//   - 言葉を形作る粒子（目標座標へばねで寄り、溜めで震え、着弾で砕ける）
 // ============================================================
 
 import type p5 from "p5";
@@ -74,6 +77,8 @@ export interface FrameParams {
   hoverX: number;
   hoverY: number;
   burstStyle: BurstStyle;
+  paletteA: number; // 場面の配色（粒子の色相の両端）
+  paletteB: number;
 }
 
 // 色相の最短経路での補間（300° → 8° を緑経由にしない）
@@ -83,7 +88,7 @@ function lerpHue(from: number, to: number, t: number): number {
 }
 
 function burstHue(style: BurstStyle): number | null {
-  if (style === "critical") return CRITICAL_HUE;
+  if (style === "critical" || style === "finale") return CRITICAL_HUE;
   if (style === "overload") return OVERCHARGE_HUE;
   return null;
 }
@@ -140,12 +145,17 @@ export class Particle {
   baseSize: number;
   noiseOffset: number; // フローフィールドの個体差用オフセット
 
-  // 個体色は不変なので HSB 分解までコンストラクタで済ませる
-  hueVal: number;
+  // 彩度・明度の個体差はコンストラクタで確定（色相は場面の配色から毎フレーム決める）
   satVal: number;
   briBase: number;
   spectrumOffset: number; // 爆発直後に散る色相のずれ
+  paletteT: number; // 場面の 2 色の間の位置 0..1（個体差）
   proximity = 0; // idle 中のカーソルへの近さ 0..1（輝度加算用）
+
+  // 言葉を形作るときの目標座標（hasTarget の間は他の力学より優先）
+  targetX = 0;
+  targetY = 0;
+  hasTarget = false;
 
   private p: p5;
 
@@ -156,8 +166,8 @@ export class Particle {
     this.noiseOffset = p.random(1000.0);
 
     // シアン〜マゼンタの個体差
-    const c = p.lerpColor(p.color(COLOR_CYAN_HEX), p.color(COLOR_MAGENTA_HEX), p.random(1.0));
-    this.hueVal = p.hue(c);
+    this.paletteT = p.random(1.0);
+    const c = p.lerpColor(p.color(COLOR_CYAN_HEX), p.color(COLOR_MAGENTA_HEX), this.paletteT);
     this.satVal = p.saturation(c);
     this.briBase = p.brightness(c);
     this.spectrumOffset = (Math.random() - 0.5) * BURST_HUE_SPREAD;
@@ -203,6 +213,7 @@ export class Particle {
 
   // pop（小破裂）用: 既存粒子を指定座標へワープさせ、放射状の初速を与える
   popSpark(px: number, py: number, speedScale = 1): void {
+    if (this.hasTarget) return; // 言葉を形作っている粒子は奪わない
     this.x = px;
     this.y = py;
     const ang = this.p.random(TWO_PI);
@@ -232,6 +243,10 @@ export class Particle {
   }
 
   update(f: FrameParams): void {
+    if (this.hasTarget && f.state !== "impact" && f.state !== "decay") {
+      this.holdTarget(f);
+      return;
+    }
     switch (f.state) {
       case "idle":
         this.flowDrift(1.0, 1.0);
@@ -288,6 +303,17 @@ export class Particle {
     const t = 0.06 * blend * timeScale;
     this.vx += (this.targetVx - this.vx) * t;
     this.vy += (this.targetVy - this.vy) * t;
+  }
+
+  // 言葉の形を保つ。溜めるほど震え、吸い込みで激しく軋む
+  private holdTarget(f: FrameParams): void {
+    const tremble = f.state === "idle" ? 0.04 : f.state === "inhale" ? 2.6 : 0.2 + f.level * 1.6 + f.overcharge * 2;
+    this.vx += (this.targetX - this.x) * 0.045 + (Math.random() * 2 - 1) * tremble;
+    this.vy += (this.targetY - this.y) * 0.045 + (Math.random() * 2 - 1) * tremble;
+    this.vx *= 0.82;
+    this.vy *= 0.82;
+    this.x += this.vx;
+    this.y += this.vy;
   }
 
   // カーソルの周りだけ粒子がそっと避ける（触る前から「生きている」と感じさせる）
@@ -352,8 +378,9 @@ export class Particle {
   }
 
   display(ctx: CanvasRenderingContext2D, f: FrameParams): void {
-    // alpha / sat / bri は 0..100 レンジ
-    let hue = this.hueVal;
+    // alpha / sat / bri は 0..100 レンジ。色相は場面の配色から決める
+    const baseHue = lerpHue(f.paletteA, f.paletteB, this.paletteT);
+    let hue = baseHue;
     let sat = this.satVal;
     let bri = this.briBase;
     let alphaVal = 22;
@@ -394,10 +421,10 @@ export class Particle {
         const burstMix = f.energy * f.energy; // 爆発直後ほど全色相へ散る
         const styleHue = burstHue(f.burstStyle);
         if (styleHue === null) {
-          hue = this.hueVal + this.spectrumOffset * burstMix;
+          hue = baseHue + this.spectrumOffset * burstMix;
         } else {
           // クリティカル = 金、暴発 = 赤に染まり、残光で元の色へ戻る
-          hue = lerpHue(this.hueVal, styleHue + this.spectrumOffset * 0.12, Math.min(f.energy * 1.4, 1));
+          hue = lerpHue(baseHue, styleHue + this.spectrumOffset * 0.12, Math.min(f.energy * 1.4, 1));
         }
         sat = this.satVal + (100 - this.satVal) * burstMix * 0.5;
         // 余韻: 減速しても energy に比例した明るさを保つ（ドロップ区間のあいだ画面が暗くならないように）
@@ -414,6 +441,13 @@ export class Particle {
         }
         break;
       }
+    }
+
+    if (this.hasTarget) {
+      // 言葉は常に読める明るさと太さで
+      bri = Math.max(bri, 95);
+      alphaVal = Math.max(alphaVal, 80);
+      sizeMul = Math.max(sizeMul, 1.7);
     }
 
     const speed = Math.hypot(this.vx, this.vy);

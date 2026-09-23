@@ -17,8 +17,8 @@ export interface ReleaseTiming {
   dropSec: number; // 着弾後のドロップ区間の長さ（0 = ドロップなし）
 }
 
-// 爆発の種類: 通常 / クリティカル（心拍の頂点で解放）/ 暴発（オーバーチャージ満了）
-export type BurstStyle = "normal" | "critical" | "overload";
+// 爆発の種類: 通常 / クリティカル（心拍の頂点で解放）/ 暴発（オーバーチャージ満了）/ 大団円（強い解放の規定回数目）
+export type BurstStyle = "normal" | "critical" | "overload" | "finale";
 
 export interface ReleaseParams {
   level: number; // 溜めレベル 0..1

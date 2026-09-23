@@ -21,6 +21,11 @@
 //   - 衝撃波が種に触れると誘爆し、その波がさらに次の種を誘爆する（連鎖。種の音が旋律として鳴る）
 //   - 解放のたびにコードが進み、背景の星雲の色合いもコードに追従する
 //
+// Phase 9-4（感動・物語）:
+//   - 「言葉を書いて、壊す」: 入力した言葉を粒子が形作り、溜めで震え、解放で砕ける（入力はブラウザ内のみ）
+//   - 強い解放のたびに爆発の痕跡がキャンバスに積もる（自分の爆発の履歴が 1 枚の絵になる）
+//   - 規定回数目の強い解放は大団円: 痕跡が一斉に発火し、場面（配色と一文）が次へ移る
+//
 // 保持 < 300ms の短クリック/タップは「小破裂（pop）」の軽量パスへ分岐する。
 // マウスとタッチは Pointer Events で同一パスに統合する。
 // ============================================================
@@ -90,6 +95,7 @@ import type { SimState, FrameParams } from "./visuals";
 import { createAudioEngine } from "./audio/engine";
 import type { BurstStyle } from "./audio/engine";
 import { CHORD_PROGRESSION, midiHue, tapToMidi } from "./music";
+import { FINALE_RELEASES, SCENES } from "./scenes";
 
 const audio = createAudioEngine();
 // チューニング・検証用に露出（本番でも害はない読み取り専用ハンドル）
@@ -203,7 +209,28 @@ const frameParams: FrameParams = {
   hoverX: 0,
   hoverY: 0,
   burstStyle: "normal",
+  paletteA: SCENES[0].paletteA,
+  paletteB: SCENES[0].paletteB,
 };
+
+// ---- 物語の状態（場面・痕跡・大団円）----
+let sceneIndex = 0;
+let sceneFrom = SCENES[0];
+let sceneBlend = 1; // 0 → 1 で sceneFrom から現在の場面へ移る
+let bigReleaseCount = 0; // 大団円までの強い解放の回数
+let isFinalePending = false; // 着弾したら場面を進める
+
+// 痕跡: 半解像度の別キャンバスに積もらせ、毎フレーム本体へ加算で重ねる
+const RESIDUE_SCALE = 2;
+let residueCanvas: HTMLCanvasElement;
+let residueCtx: CanvasRenderingContext2D;
+let residuePoints: { x: number; y: number }[] = [];
+let residueFade = 1; // 大団円の発火後に 1 → 0 で消える
+let isResidueFading = false;
+
+// 言葉
+const WORD_MAX_LENGTH = 16;
+const WORD_PARTICLE_RATIO = 0.5; // 全粒子のうち言葉に使う割合
 
 // 背景色の HSB 分解（起動時 1 回）
 let bgHue = 0;
@@ -270,6 +297,10 @@ function updateState(p: p5): void {
     if (now >= hitstopEndMillis) {
       state = "decay";
       decayStartMillis = now;
+      if (isFinalePending) {
+        isFinalePending = false;
+        advanceScene();
+      }
     }
   } else if (state === "decay") {
     updateDecay(now);
@@ -468,6 +499,17 @@ function beginRelease(
     level + overchargeAmount * OVERCHARGE_POWER_BONUS + (releaseStyle === "critical" ? CRITICAL_POWER_BONUS : 0);
   if (releaseStyle === "overload") releasePower = 1 + OVERCHARGE_POWER_BONUS;
 
+  // 強い解放を重ねると、規定回数目は大団円になる
+  if (level >= 0.35) {
+    bigReleaseCount++;
+    if (bigReleaseCount >= FINALE_RELEASES) {
+      bigReleaseCount = 0;
+      releaseStyle = "finale";
+      releasePower = 1.5;
+      isFinalePending = true;
+    }
+  }
+
   const flick = forcedDirection ?? measureFlick(performance.now());
   releaseDirX = flick.dirX;
   releaseDirY = flick.dirY;
@@ -499,7 +541,13 @@ function triggerImpact(now: number): void {
   }
 
   const waveLevel = Math.min(releasePower, 1.3);
-  const styleHue = releaseStyle === "critical" ? CRITICAL_HUE : releaseStyle === "overload" ? OVERCHARGE_HUE : undefined;
+  const styleHue =
+    releaseStyle === "critical" || releaseStyle === "finale"
+      ? CRITICAL_HUE
+      : releaseStyle === "overload"
+        ? OVERCHARGE_HUE
+        : undefined;
+  releaseWord(); // 言葉は砕ける
   spawnShockwave(releaseX, releaseY, waveLevel, "lead");
   spawnShockwave(releaseX, releaseY, waveLevel, "main", styleHue);
   spawnShockwave(releaseX, releaseY, waveLevel, "echo");
@@ -512,10 +560,19 @@ function triggerImpact(now: number): void {
     for (let i = 1; i <= 3; i++) {
       spawnShockwave(releaseX, releaseY, waveLevel * (1 - i * 0.12), "main", OVERCHARGE_HUE + i * 10, 90, i * 7);
     }
+  } else if (releaseStyle === "finale") {
+    // 大団円: 場面の色の多重波が画面全体を覆い、痕跡が一斉に発火する
+    const scene = currentScene();
+    for (let i = 1; i <= 5; i++) {
+      const hue = blendHue(scene.paletteA, scene.paletteB, i / 5);
+      spawnShockwave(releaseX, releaseY, 1.3, i % 2 === 0 ? "lead" : "main", hue, 70, i * 6);
+    }
+    igniteResidue();
   }
+  if (releaseLevel >= 0.35 && releaseStyle !== "finale") addResidue(releaseX, releaseY, releasePower, residueHue());
 
   const intensity = Math.min(releasePower, 1);
-  flashAlpha = lerp(FLASH_ALPHA_MIN, FLASH_ALPHA_MAX, intensity);
+  flashAlpha = releaseStyle === "finale" ? 85 : lerp(FLASH_ALPHA_MIN, FLASH_ALPHA_MAX, intensity);
   flashHue = styleHue ?? 0;
   flashSat = styleHue === undefined ? 0 : 55;
   coreFlash = 1;
@@ -523,7 +580,8 @@ function triggerImpact(now: number): void {
   zoomVelocity = ZOOM_IMPACT_KICK * (0.4 + 0.6 * intensity) * Math.max(releasePower, 1);
   vibrate(releaseStyle === "normal" ? Math.round(25 + 60 * intensity) : [60, 40, 120]);
 
-  const hitstopScale = releaseStyle === "overload" ? 1.4 : releaseStyle === "critical" ? 1.25 : 1;
+  const hitstopScale =
+    releaseStyle === "finale" ? 2 : releaseStyle === "overload" ? 1.4 : releaseStyle === "critical" ? 1.25 : 1;
   hitstopEndMillis = now + lerp(HITSTOP_MS_MIN, HITSTOP_MS_MAX, intensity) * hitstopScale;
   state = "impact";
   chainCount = 0;
@@ -657,7 +715,10 @@ function scheduleSecondaryBursts(startMillis: number): void {
   secondaryBursts.length = 0;
   let count = 0;
   let spacingMs = 160;
-  if (releaseStyle === "critical") {
+  if (releaseStyle === "finale") {
+    count = 16;
+    spacingMs = 90;
+  } else if (releaseStyle === "critical") {
     count = 7;
     spacingMs = 85;
   } else if (releaseStyle === "overload") {
@@ -674,7 +735,9 @@ function scheduleSecondaryBursts(startMillis: number): void {
     const x = releaseX + Math.cos(angle) * distance + releaseDirX * releaseDirAmount * 220;
     const y = releaseY + Math.sin(angle) * distance + releaseDirY * releaseDirAmount * 220;
     const hue =
-      releaseStyle === "critical"
+      releaseStyle === "finale"
+        ? blendHue(frameParams.paletteA, frameParams.paletteB, Math.random())
+        : releaseStyle === "critical"
         ? CRITICAL_HUE + (Math.random() - 0.5) * 30
         : releaseStyle === "overload"
           ? OVERCHARGE_HUE + Math.random() * 35
@@ -837,10 +900,16 @@ function initOverlayGate(p: p5): void {
     event.preventDefault();
     overlay.removeEventListener("pointerdown", onFirstPointerDown);
     overlay.classList.add("overlay--hidden");
+    document.getElementById("word-ui")?.classList.add("is-ready");
     if (event.pointerType === "touch") requestMotionPermission();
 
+    // 音声の起動（Strudel 読み込み・プラック合成）を待つ間に指が離れていたら、溜めでなくタップとして扱う。
+    // 待たずに溜めへ入ると、離し済みのため次のタップまで charging から抜けられない（低速端末で実測）
+    let isStillHeld = true;
+    window.addEventListener("pointerup", () => (isStillHeld = false), { once: true });
     void audio.start().then(() => {
       handlePointerDown(p, event.clientX, event.clientY);
+      if (!isStillHeld) handlePointerUp(p);
     });
 
     window.setTimeout(() => overlay.remove(), 500); // トランジション終了後に DOM から除去
@@ -849,13 +918,258 @@ function initOverlayGate(p: p5): void {
   overlay.addEventListener("pointerdown", onFirstPointerDown, { passive: false });
 }
 
+// ---- 場面 ----
+
+function currentScene() {
+  return SCENES[sceneIndex % SCENES.length];
+}
+
+function blendHue(from: number, to: number, t: number): number {
+  return from + (((((to - from) % 360) + 540) % 360) - 180) * t;
+}
+
+function updateScene(): void {
+  if (sceneBlend < 1) sceneBlend = Math.min(sceneBlend + 1 / (60 * 3), 1); // 約 3 秒で移る
+  const scene = currentScene();
+  frameParams.paletteA = blendHue(sceneFrom.paletteA, scene.paletteA, sceneBlend);
+  frameParams.paletteB = blendHue(sceneFrom.paletteB, scene.paletteB, sceneBlend);
+}
+
+function advanceScene(): void {
+  sceneFrom = currentScene();
+  sceneIndex++;
+  sceneBlend = 0;
+  showCaption(currentScene().caption);
+}
+
+function showCaption(text: string): void {
+  const caption = document.getElementById("scene-caption");
+  if (!caption || !text) return;
+  caption.textContent = text;
+  caption.classList.add("is-visible");
+  window.setTimeout(() => caption.classList.remove("is-visible"), 3800);
+}
+
+// ---- 痕跡 ----
+
+function createResidueLayer(): void {
+  residueCanvas = document.createElement("canvas");
+  const context = residueCanvas.getContext("2d");
+  if (!context) throw new Error("痕跡レイヤーの 2D context を取得できません");
+  residueCtx = context;
+  resizeResidueLayer();
+}
+
+function resizeResidueLayer(): void {
+  // リサイズで痕跡は失われる（座標系が変わるため。作品として許容）
+  residueCanvas.width = Math.ceil(window.innerWidth / RESIDUE_SCALE);
+  residueCanvas.height = Math.ceil(window.innerHeight / RESIDUE_SCALE);
+  residuePoints = [];
+}
+
+function addResidue(x: number, y: number, power: number, hue: number): void {
+  const c = residueCtx;
+  const rx = x / RESIDUE_SCALE;
+  const ry = y / RESIDUE_SCALE;
+  const radius = (160 + 220 * Math.min(power, 1.4)) / RESIDUE_SCALE;
+  c.save();
+  c.globalCompositeOperation = "lighter";
+  const glowHue = avoidMuddyHue(hue); // 光の染みは濁る帯を避ける（星屑は元の色のまま）
+  const gradient = c.createRadialGradient(rx, ry, 0, rx, ry, radius * 0.8);
+  gradient.addColorStop(0, `hsla(${glowHue}, 80%, 55%, 0.1)`);
+  gradient.addColorStop(1, `hsla(${glowHue}, 80%, 40%, 0)`);
+  c.fillStyle = gradient;
+  c.beginPath();
+  c.arc(rx, ry, radius * 0.8, 0, Math.PI * 2);
+  c.fill();
+  c.strokeStyle = `hsla(${hue}, 80%, 70%, 0.12)`;
+  c.lineWidth = 1;
+  c.beginPath();
+  c.arc(rx, ry, radius, 0, Math.PI * 2);
+  c.stroke();
+  for (let i = 0; i < 46; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = radius * (0.35 + Math.random() * 0.9);
+    const sx = rx + Math.cos(angle) * distance;
+    const sy = ry + Math.sin(angle) * distance;
+    c.fillStyle = `hsla(${hue + (Math.random() - 0.5) * 40}, 70%, 80%, ${0.35 + Math.random() * 0.4})`;
+    c.fillRect(sx, sy, 0.8 + Math.random() * 0.9, 0.8 + Math.random() * 0.9);
+    if (i % 2 === 0) residuePoints.push({ x: sx * RESIDUE_SCALE, y: sy * RESIDUE_SCALE });
+  }
+  c.restore();
+}
+
+// 大団円: 積もった痕跡の星屑から一斉に火花が上がり、絵は消えていく
+function igniteResidue(): void {
+  const sparksPerPoint = Math.max(2, Math.floor((particles.length * 0.6) / Math.max(residuePoints.length, 1)));
+  let cursor = 0;
+  for (const point of residuePoints) {
+    for (let i = 0; i < sparksPerPoint && cursor < particles.length; i++, cursor++) {
+      particles[cursor].popSpark(point.x, point.y, 1.5 + Math.random());
+    }
+  }
+  isResidueFading = true;
+}
+
+function drawResidue(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  if (isResidueFading) {
+    residueFade -= 1 / (60 * 2.5);
+    if (residueFade <= 0) {
+      residueCtx.clearRect(0, 0, residueCanvas.width, residueCanvas.height);
+      residuePoints = [];
+      residueFade = 1;
+      isResidueFading = false;
+      return;
+    }
+  }
+  ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = 0.5 * residueFade;
+  ctx.drawImage(residueCanvas, 0, 0, w, h);
+}
+
+function residueHue(): number {
+  if (releaseStyle === "critical" || releaseStyle === "finale") return CRITICAL_HUE;
+  if (releaseStyle === "overload") return OVERCHARGE_HUE;
+  return blendHue(frameParams.paletteA, frameParams.paletteB, Math.random());
+}
+
+// 大団円までの進み具合（画面下の点）
+function drawProgressDots(p: p5): void {
+  const spacing = 16;
+  // 狭い画面では右下の「言葉を書いて、壊す」と重なるため左下へ寄せる（390px 幅で重なりを実測）
+  const isNarrow = p.width < 640;
+  const startX = isNarrow ? 26 : p.width / 2 - ((FINALE_RELEASES - 1) * spacing) / 2;
+  const y = p.height - (isNarrow ? 36 : 22);
+  const scene = currentScene();
+  const isNext = bigReleaseCount === FINALE_RELEASES - 1;
+  const pulse = isNext ? 0.5 + 0.5 * Math.sin(p.millis() * 0.008) : 0;
+  p.push();
+  p.blendMode(p.ADD);
+  for (let i = 0; i < FINALE_RELEASES; i++) {
+    const x = startX + i * spacing;
+    const isFilled = i < bigReleaseCount;
+    const hue = blendHue(scene.paletteA, scene.paletteB, i / (FINALE_RELEASES - 1));
+    p.noStroke();
+    if (isFilled) {
+      p.fill(hue, 60, 100, 55 + 30 * pulse);
+      p.circle(x, y, 6 + 3 * pulse);
+    } else {
+      p.noFill();
+      p.stroke(hue, 30, 80, isNext && i === FINALE_RELEASES - 1 ? 30 + 50 * pulse : 22);
+      p.strokeWeight(1);
+      p.circle(x, y, 6);
+    }
+  }
+  p.pop();
+}
+
+// ---- 言葉を書いて、壊す ----
+
+function initWordUi(): void {
+  const toggle = document.getElementById("word-toggle");
+  const form = document.getElementById("word-form") as HTMLFormElement | null;
+  const input = document.getElementById("word-input") as HTMLInputElement | null;
+  if (!toggle || !form || !input) return;
+  input.maxLength = WORD_MAX_LENGTH;
+
+  const close = () => {
+    form.hidden = true;
+    toggle.hidden = false;
+    input.blur();
+  };
+  toggle.addEventListener("click", () => {
+    toggle.hidden = true;
+    form.hidden = false;
+    input.value = "";
+    input.focus();
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const word = input.value.trim();
+    close();
+    if (word) formWord(word);
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  input.addEventListener("blur", () => {
+    if (!input.value.trim()) close();
+  });
+}
+
+function formWord(word: string): void {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const c = canvas.getContext("2d", { willReadFrequently: true });
+  if (!c) return;
+  const fontFamily = '"Helvetica Neue", Arial, "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif';
+  let size = Math.min(h * 0.3, 240);
+  c.font = `bold ${size}px ${fontFamily}`;
+  const measured = c.measureText(word).width;
+  if (measured > w * 0.86) size *= (w * 0.86) / measured;
+  c.font = `bold ${size}px ${fontFamily}`;
+  c.textAlign = "center";
+  c.textBaseline = "middle";
+  c.fillStyle = "#fff";
+  c.fillText(word, w / 2, h * 0.44);
+
+  const target = Math.floor(particles.length * WORD_PARTICLE_RATIO);
+  const data = c.getImageData(0, 0, w, h).data;
+  let points: { x: number; y: number }[] = [];
+  for (let step = 4; step >= 2; step--) {
+    points = [];
+    for (let y = 0; y < h; y += step) {
+      for (let x = 0; x < w; x += step) {
+        if (data[(y * w + x) * 4 + 3] > 128) points.push({ x, y });
+      }
+    }
+    if (points.length >= target * 0.6) break;
+  }
+  if (points.length === 0) return;
+  // 多すぎれば間引く（シャッフルして先頭から）
+  for (let i = points.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [points[i], points[j]] = [points[j], points[i]];
+  }
+  points = points.slice(0, target);
+
+  for (const particle of particles) particle.hasTarget = false;
+  // 粒子もシャッフルした順で割り当てる（色の個体差が文字全体に散るように）
+  const order = particles.map((_, index) => index);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  points.forEach((point, i) => {
+    const particle = particles[order[i]];
+    particle.targetX = point.x + (Math.random() - 0.5) * 1.5;
+    particle.targetY = point.y + (Math.random() - 0.5) * 1.5;
+    particle.hasTarget = true;
+  });
+  audio.sparkBurst(0.5, 0.8, "critical");
+}
+
+function releaseWord(): void {
+  for (const particle of particles) particle.hasTarget = false;
+}
+
 // ---- 背景の星雲（ゆっくり漂う 3 つの色の雲。状態で明るさと色が変わる）----
 
 const NEBULA_BLOBS = [
-  { hue: 190, speedX: 0.00011, speedY: 0.00017, phase: 0 },
-  { hue: 318, speedX: 0.00013, speedY: 0.00009, phase: 2.1 },
-  { hue: 260, speedX: 0.00007, speedY: 0.00012, phase: 4.2 },
+  { speedX: 0.00011, speedY: 0.00017, phase: 0 },
+  { speedX: 0.00013, speedY: 0.00009, phase: 2.1 },
+  { speedX: 0.00007, speedY: 0.00012, phase: 4.2 },
 ];
+
+// 橙〜黄緑（15〜125°）は暗い低 alpha だと茶色・オリーブに濁る（実測）。星雲では帯の外へ逃がす
+function avoidMuddyHue(hue: number): number {
+  const h = ((hue % 360) + 360) % 360;
+  if (h > 15 && h < 125) return h < 70 ? 15 : 125;
+  return h;
+}
 
 function drawNebula(ctx: CanvasRenderingContext2D, w: number, h: number, now: number): void {
   // コード進行に合わせて全体の色合いをゆっくりずらす
@@ -865,15 +1179,18 @@ function drawNebula(ctx: CanvasRenderingContext2D, w: number, h: number, now: nu
   if (state === "charging") intensity = 0.05 + 0.05 * level;
   else if (state === "decay") intensity = 0.05 + 0.1 * energy;
   const radius = Math.max(w, h) * 0.55;
-  for (const blob of NEBULA_BLOBS) {
+  const scene = currentScene();
+  for (let i = 0; i < NEBULA_BLOBS.length; i++) {
+    const blob = NEBULA_BLOBS[i];
     const x = w * (0.5 + 0.38 * Math.sin(now * blob.speedX + blob.phase));
     const y = h * (0.5 + 0.34 * Math.cos(now * blob.speedY + blob.phase * 1.3));
-    // 爆発直後は種類の色へ寄せる
-    let hue = blob.hue + chordHueShift;
-    if (state === "decay" && releaseStyle !== "normal") {
-      const target = releaseStyle === "critical" ? CRITICAL_HUE : OVERCHARGE_HUE;
-      hue = hue + (((((target - hue) % 360) + 540) % 360) - 180) * energy;
+    // 場面の 3 色 + コードのずらし
+    let hue = blendHue(sceneFrom.nebula[i], scene.nebula[i], sceneBlend) + chordHueShift;
+    // 暴発の直後だけ赤へ寄せる（金は暗い低 alpha だと茶〜緑に濁るので、星雲では寄せない。金は粒子と輪で出す）
+    if (state === "decay" && releaseStyle === "overload") {
+      hue = hue + (((((OVERCHARGE_HUE - hue) % 360) + 540) % 360) - 180) * energy;
     }
+    hue = avoidMuddyHue(hue);
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
     gradient.addColorStop(0, `hsla(${hue}, 80%, 45%, ${intensity})`);
     gradient.addColorStop(1, "hsla(0, 0%, 0%, 0)");
@@ -1043,6 +1360,8 @@ const sketch = (p: p5) => {
 
     vignetteImg = buildVignette(p, p.width, p.height);
     createGlowLayer(canvasRenderer.elt.parentElement as HTMLElement);
+    createResidueLayer();
+    initWordUi();
 
     pointerX = p.width / 2;
     pointerY = p.height / 2;
@@ -1086,6 +1405,10 @@ const sketch = (p: p5) => {
       particles: particles.length,
       drawMs: drawMsAverage,
       tier: currentTier,
+      scene: currentScene().name,
+      bigReleaseCount,
+      residuePoints: residuePoints.length,
+      wordParticles: particles.filter((particle) => particle.hasTarget).length,
       seeds: seeds.length,
       chainCount,
       chord: CHORD_PROGRESSION[audio.getChordIndex() % CHORD_PROGRESSION.length].name,
@@ -1100,6 +1423,7 @@ const sketch = (p: p5) => {
     p.resizeCanvas(window.innerWidth, window.innerHeight);
     vignetteImg = buildVignette(p, p.width, p.height);
     resizeGlowLayer();
+    resizeResidueLayer();
   };
 
   p.draw = () => {
@@ -1108,6 +1432,7 @@ const sketch = (p: p5) => {
     updateState(p);
     updateSecondaryBursts(p, p.millis());
     updateSeeds(p);
+    updateScene();
     updateShake(p);
     updateCamera();
 
@@ -1122,6 +1447,9 @@ const sketch = (p: p5) => {
     const directCtx = p.drawingContext as CanvasRenderingContext2D;
     directCtx.save();
     drawNebula(directCtx, p.width, p.height, p.millis());
+    directCtx.restore();
+    directCtx.save();
+    drawResidue(directCtx, p.width, p.height);
     directCtx.restore();
 
     p.push();
@@ -1240,6 +1568,7 @@ const sketch = (p: p5) => {
     }
 
     drawMsAverage += (performance.now() - drawStart - drawMsAverage) * 0.1;
+    drawProgressDots(p);
     if (showHud) drawHud(p);
 
     // パフォーマンス計測（統合検証用。120 フレームごとに fps をログへ）
@@ -1249,6 +1578,7 @@ const sketch = (p: p5) => {
   };
 
   p.keyPressed = () => {
+    if (document.activeElement instanceof HTMLInputElement) return; // 言葉の入力中はショートカット無効
     if (p.key === "d" || p.key === "D") {
       showHud = !showHud;
     }
