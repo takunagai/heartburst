@@ -50,6 +50,17 @@ export interface AudioEngine {
   getAmp(): number; // マスター振幅 0..1
   getDiagnostics(): Record<string, string>; // 実機で鳴らないときの切り分け用（?debug で表示）
   preload(): void; // 導入画面の表示中に重い読み込みを前倒しする
+  enableVoice(): Promise<VoiceStatus>; // 声で溜める（マイク。ユーザー操作の中で呼ぶ）
+  disableVoice(): void;
+  getVoiceLevel(): number; // 声量 0..1（毎フレーム呼んでよい）
+}
+
+// マイクが使えない理由も区別する（UI の表示を変えるため）
+export type VoiceStatus = "on" | "denied" | "unsupported";
+
+export function isVoiceSupported(): boolean {
+  // getUserMedia は https か localhost でしか公開されない
+  return typeof navigator.mediaDevices?.getUserMedia === "function";
 }
 
 export class NoopAudioEngine implements AudioEngine {
@@ -85,6 +96,13 @@ export class NoopAudioEngine implements AudioEngine {
     return { engine: "muted (?mute)" };
   }
   preload(): void {}
+  async enableVoice(): Promise<VoiceStatus> {
+    return "unsupported";
+  }
+  disableVoice(): void {}
+  getVoiceLevel(): number {
+    return 0;
+  }
 }
 
 import { CatharsisAudioEngine } from "./catharsis-engine";

@@ -14,7 +14,9 @@
 //   - 段階チャージの和音、オーバーチャージの Shepard トーン + 放電ノイズ
 //   - 心拍の位相の公開（クリティカル判定用）、爆発の種類別レイヤー（金の鐘 / 暴発のクラッシュ）
 
-import type { AudioEngine, BurstStyle, ReleaseParams, ReleaseTiming, SeedNote } from "./engine";
+import type { AudioEngine, BurstStyle, ReleaseParams, ReleaseTiming, SeedNote, VoiceStatus } from "./engine";
+import { isVoiceSupported } from "./engine";
+import { VOICE_CEIL_DB, VOICE_FLOOR_DB } from "../tuning";
 import type { StrudelClock } from "./pattern";
 import {
   CHORD_PROGRESSION,
@@ -166,6 +168,15 @@ export class CatharsisAudioEngine implements AudioEngine {
 
   private dropBus: GainNode | null = null; // 進行中のドロップ区間（次の溜めで止める）
 
+  // 声で溜める: マイク → analyser（出力には流さない。音量を測るだけ）
+  private voice: {
+    stream: MediaStream;
+    source: MediaStreamAudioSourceNode;
+    analyser: AnalyserNode;
+    buffer: Float32Array<ArrayBuffer>;
+    level: number;
+  } | null = null;
+
   // resume() は待たない。タッチ端末では pointerdown が「ユーザー操作」に数えられず（HTML の user activation は
   // タッチだと pointerup / touchend から）、ゲートの pointerdown で resume() しても解決しない ─ スマホで無音だった原因。
   // 配線は先に済ませ、再開は installUnlockListeners() が指を離した時・タップ時に行う
@@ -269,6 +280,55 @@ export class CatharsisAudioEngine implements AudioEngine {
   }
 
   // 実機（特に iOS）で鳴らないときの切り分け用。?debug で画面に出す
+  // ============ 声で溜める ============
+
+  async enableVoice(): Promise<VoiceStatus> {
+    if (this.voice) return "on";
+    if (!this.isReady || !isVoiceSupported()) return "unsupported";
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        // エコーキャンセルで自分の爆発音を拾いにくくする。自動ゲインは声の強弱を潰すので切る
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+      });
+    } catch (error) {
+      this.lastError = `mic: ${String(error)}`;
+      return "denied";
+    }
+    const source = this.ctx.createMediaStreamSource(stream);
+    const analyser = this.ctx.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    // 出力に繋がないノードを処理しないブラウザがあるため、無音で出力へ繋いでおく（声は鳴らさない）
+    const sink = this.ctx.createGain();
+    sink.gain.value = 0;
+    analyser.connect(sink).connect(this.ctx.destination);
+    this.voice = { stream, source, analyser, buffer: new Float32Array(analyser.fftSize), level: 0 };
+    return "on";
+  }
+
+  disableVoice(): void {
+    const voice = this.voice;
+    if (!voice) return;
+    this.voice = null;
+    voice.stream.getTracks().forEach((track) => track.stop());
+    voice.source.disconnect();
+    voice.analyser.disconnect();
+  }
+
+  // 声量 0..1: RMS を dB にして VOICE_FLOOR_DB〜VOICE_CEIL_DB を 0..1 に写す。立ち上がりは速く、減衰はゆっくり
+  getVoiceLevel(): number {
+    const voice = this.voice;
+    if (!voice) return 0;
+    voice.analyser.getFloatTimeDomainData(voice.buffer);
+    let sum = 0;
+    for (let i = 0; i < voice.buffer.length; i++) sum += voice.buffer[i] ** 2;
+    const db = 20 * Math.log10(Math.sqrt(sum / voice.buffer.length) + 1e-9);
+    const target = Math.min(Math.max((db - VOICE_FLOOR_DB) / (VOICE_CEIL_DB - VOICE_FLOOR_DB), 0), 1);
+    voice.level += (target - voice.level) * (target > voice.level ? 0.5 : 0.12);
+    return voice.level;
+  }
+
   // 導入画面の表示中に Strudel を先読みする（タップ後の読み込み・パースの停止を前倒しで済ませる）
   preload(): void {
     void import("./pattern").then((pattern) => pattern.preloadPatternLayer());
@@ -284,6 +344,7 @@ export class CatharsisAudioEngine implements AudioEngine {
       ready: String(this.isReady),
       strudel: this.clock ? (this.clock.started ? "running" : "loaded") : "not started",
       amp: this.analyser ? this.getAmp().toFixed(3) : "-",
+      voice: this.voice ? this.voice.level.toFixed(2) : "off",
       lastError: this.lastError || "-",
     };
   }

@@ -21,6 +21,9 @@
 //   - 衝撃波が種に触れると誘爆し、その波がさらに次の種を誘爆する（連鎖。種の音が旋律として鳴る）
 //   - 解放のたびにコードが進み、背景の星雲の色合いもコードに追従する
 //
+// E3（声で溜める・任意）: マイクの声量で溜める。声だけなら画面中央で溜まり、声を止めると解放。
+//   長押し中は声量ぶん溜めが加速する。マイクの音は音量の計測だけに使い、録音・送信はしない
+//
 // Phase 9-4（感動・物語）:
 //   - 「言葉を書いて、壊す」: 入力した言葉を粒子が形作り、溜めで震え、解放で砕ける（入力はブラウザ内のみ）
 //   - 強い解放のたびに爆発の痕跡がキャンバスに積もる（自分の爆発の履歴が 1 枚の絵になる）
@@ -89,10 +92,17 @@ import {
   SLINGSHOT_MAX_SPEED,
   SLINGSHOT_SAMPLE_MS,
   SHAKE_RELEASE_ACCEL,
+  VOICE_START_LEVEL,
+  VOICE_START_HOLD_MS,
+  VOICE_STOP_LEVEL,
+  VOICE_RELEASE_SILENCE_MS,
+  VOICE_CHARGE_RATE,
+  VOICE_BOOST_PER_FRAME,
+  VOICE_REARM_MS,
 } from "./tuning";
 import { Particle, Shockwave, buildVignette } from "./visuals";
 import type { SimState, FrameParams } from "./visuals";
-import { createAudioEngine } from "./audio/engine";
+import { createAudioEngine, isVoiceSupported } from "./audio/engine";
 import type { BurstStyle } from "./audio/engine";
 import { CHORD_PROGRESSION, midiHue, tapToMidi } from "./music";
 import { FINALE_RELEASES, SCENES } from "./scenes";
@@ -252,6 +262,18 @@ let pointerY = 0;
 let prevPointerX = 0;
 let prevPointerY = 0;
 let isPointerDown = false;
+
+// 溜めの中心と起点（ポインタで溜めるときはポインタに追従、声で溜めるときは画面中央に固定）
+let chargeX = 0;
+let chargeY = 0;
+let chargeSource: "pointer" | "voice" = "pointer";
+
+// 声で溜める
+let isVoiceEnabled = false;
+let voiceLevel = 0;
+let voiceCharge = 0;
+let voiceAboveSinceMillis = -1;
+let voiceBelowSinceMillis = -1;
 // 直近のポインタ軌跡（スリングショットの弾き速度の算出用）
 const pointerSamples: { t: number; x: number; y: number }[] = [];
 let lastHoverMoveMillis = Number.NEGATIVE_INFINITY; // マウスのホバー移動（タッチには無い）
@@ -309,9 +331,18 @@ function updateState(p: p5): void {
 }
 
 function updateCharging(p: p5, now: number): void {
-  const heldMs = now - chargeStartMillis;
-  const t = Math.min(Math.max(heldMs / CHARGE_DURATION_MS, 0), 1);
-  level = Math.min(Math.max(easeOutQuad(t) + dragBoost, 0), 1);
+  if (chargeSource === "voice") {
+    // 声で溜める: 保持時間でなく、声量を積み上げる（大きな声ほど速い）
+    voiceCharge = Math.min(voiceCharge + Math.pow(voiceLevel, 1.2) * VOICE_CHARGE_RATE, 1);
+    level = voiceCharge;
+  } else {
+    chargeX = pointerX;
+    chargeY = pointerY;
+    if (isVoiceEnabled) dragBoost = Math.min(dragBoost + voiceLevel * VOICE_BOOST_PER_FRAME, 1); // 叫ぶほど速く溜まる
+    const heldMs = now - chargeStartMillis;
+    const t = Math.min(Math.max(heldMs / CHARGE_DURATION_MS, 0), 1);
+    level = Math.min(Math.max(easeOutQuad(t) + dragBoost, 0), 1);
+  }
   audio.chargeLevel(level);
 
   const tier = CHARGE_TIERS.filter((threshold) => level >= threshold - 1e-6).length;
@@ -337,7 +368,7 @@ function updateCharging(p: p5, now: number): void {
       vibrate(12);
     }
     if (overchargeAmount >= 1) {
-      const [nx, ny] = normalize(pointerX, pointerY, p.width, p.height);
+      const [nx, ny] = normalize(chargeX, chargeY, p.width, p.height);
       beginRelease(p, nx, ny, "overload");
     }
   }
@@ -352,7 +383,7 @@ const TIER_RING_COLORS: [number, number][] = [
 function onTierUp(tier: number): void {
   audio.tierUp(tier);
   const [hue, sat] = TIER_RING_COLORS[tier - 1];
-  spawnShockwave(pointerX, pointerY, tier / 3, "tier", hue, sat);
+  spawnShockwave(chargeX, chargeY, tier / 3, "tier", hue, sat);
   shakeIntensity = Math.max(shakeIntensity, 2 + tier * 2.5);
   flashAlpha = Math.max(flashAlpha, 4 + tier * 3);
   flashHue = hue;
@@ -393,8 +424,8 @@ function updateCamera(): void {
   let target = 1;
   if (state === "charging") {
     target = 1 + ZOOM_INHALE * 0.35 * level; // 溜め中はじわりと寄る
-    zoomCenterX = pointerX;
-    zoomCenterY = pointerY;
+    zoomCenterX = chargeX;
+    zoomCenterY = chargeY;
   } else if (state === "inhale") {
     target = 1 + ZOOM_INHALE * releaseLevel;
   }
@@ -488,8 +519,8 @@ function beginRelease(
   forcedDirection?: { dirX: number; dirY: number; amount: number },
 ): void {
   releaseLevel = level;
-  releaseX = pointerX;
-  releaseY = pointerY;
+  releaseX = chargeX;
+  releaseY = chargeY;
   zoomCenterX = releaseX;
   zoomCenterY = releaseY;
 
@@ -511,7 +542,9 @@ function beginRelease(
     }
   }
 
-  const flick = forcedDirection ?? measureFlick(performance.now());
+  // 声で溜めたときはポインタの動きと無関係なので、弾き方向は付けない
+  const flick =
+    forcedDirection ?? (chargeSource === "voice" ? { dirX: 0, dirY: 0, amount: 0 } : measureFlick(performance.now()));
   releaseDirX = flick.dirX;
   releaseDirY = flick.dirY;
   releaseDirAmount = flick.amount;
@@ -813,8 +846,16 @@ function spawnShockwave(
 function handlePointerDown(p: p5, clientX: number, clientY: number): void {
   // inhale / impact 中は受け付けない（着弾演出を途中で壊さない）
   if (state !== "idle" && state !== "decay") return;
+  beginCharging(p, clientX, clientY, "pointer");
+}
 
+function beginCharging(p: p5, x: number, y: number, source: "pointer" | "voice"): void {
   state = "charging";
+  chargeSource = source;
+  chargeX = x;
+  chargeY = y;
+  voiceCharge = 0;
+  voiceBelowSinceMillis = -1;
   chargeStartMillis = p.millis();
   level = 0;
   dragBoost = 0;
@@ -824,13 +865,15 @@ function handlePointerDown(p: p5, clientX: number, clientY: number): void {
   overchargeAmount = 0;
   pointerSamples.length = 0;
 
-  pointerX = clientX;
-  pointerY = clientY;
-  prevPointerX = clientX;
-  prevPointerY = clientY;
-  isPointerDown = true;
+  if (source === "pointer") {
+    pointerX = x;
+    pointerY = y;
+    prevPointerX = x;
+    prevPointerY = y;
+    isPointerDown = true;
+  }
 
-  const [nx, ny] = normalize(clientX, clientY, p.width, p.height);
+  const [nx, ny] = normalize(x, y, p.width, p.height);
   audio.chargeStart(nx, ny);
 }
 
@@ -875,12 +918,83 @@ function handleDeviceMotion(p: p5, event: DeviceMotionEvent): void {
   if (magnitude < SHAKE_RELEASE_ACCEL) return;
   // 端末座標系は y が上向き。画面座標（y 下向き）へ反転する
   const length = Math.hypot(a.x, a.y) || 1;
-  const [nx, ny] = normalize(pointerX, pointerY, p.width, p.height);
+  const [nx, ny] = normalize(chargeX, chargeY, p.width, p.height);
   isPointerDown = false;
   beginRelease(p, nx, ny, undefined, { dirX: a.x / length, dirY: -a.y / length, amount: 0.8 });
 }
 
 // iOS 13+ はモーションセンサーの利用にユーザー操作起点の許可要求が必要
+// ---- 声で溜める ----
+
+// 毎フレーム: 声量を読み、声だけの溜めの開始（声が続いたら）と解放（声が止んだら）を判定する
+function updateVoice(p: p5, now: number): void {
+  if (!isVoiceEnabled) return;
+  voiceLevel = audio.getVoiceLevel();
+  updateVoiceMeter(voiceLevel);
+
+  if (state === "charging") {
+    if (chargeSource !== "voice") return;
+    shakeIntensity = Math.max(shakeIntensity, voiceLevel * 5); // 叫びで画面が震える
+    if (voiceLevel < VOICE_STOP_LEVEL) {
+      if (voiceBelowSinceMillis < 0) voiceBelowSinceMillis = now;
+      if (now - voiceBelowSinceMillis > VOICE_RELEASE_SILENCE_MS) {
+        const [nx, ny] = normalize(chargeX, chargeY, p.width, p.height);
+        beginRelease(p, nx, ny);
+      }
+    } else {
+      voiceBelowSinceMillis = -1;
+    }
+    return;
+  }
+
+  // 爆発直後は自分の爆発音を拾いやすいので、少し待ってから声の溜めを受け付ける
+  const canStart = state === "idle" || (state === "decay" && now - decayStartMillis > VOICE_REARM_MS);
+  if (!canStart || isPointerDown || voiceLevel < VOICE_START_LEVEL) {
+    voiceAboveSinceMillis = -1;
+    return;
+  }
+  if (voiceAboveSinceMillis < 0) voiceAboveSinceMillis = now;
+  if (now - voiceAboveSinceMillis > VOICE_START_HOLD_MS) {
+    voiceAboveSinceMillis = -1;
+    beginCharging(p, p.width / 2, p.height / 2, "voice");
+  }
+}
+
+function updateVoiceMeter(value: number): void {
+  const meter = document.getElementById("voice-meter");
+  if (meter) meter.style.transform = `scaleX(${value.toFixed(2)})`;
+}
+
+function initVoiceUi(): void {
+  const toggle = document.getElementById("voice-toggle") as HTMLButtonElement | null;
+  const label = document.getElementById("voice-label");
+  if (!toggle || !label) return;
+  if (!isVoiceSupported()) return; // https / localhost 以外ではマイクが使えないので出さない
+  toggle.hidden = false;
+
+  toggle.addEventListener("click", async () => {
+    if (isVoiceEnabled) {
+      audio.disableVoice();
+      isVoiceEnabled = false;
+      voiceLevel = 0;
+      updateVoiceMeter(0);
+      label.textContent = "声で溜める";
+      toggle.setAttribute("aria-pressed", "false");
+      return;
+    }
+    label.textContent = "マイクを準備中";
+    const status = await audio.enableVoice();
+    if (status === "on") {
+      isVoiceEnabled = true;
+      label.textContent = "声で溜める：オン";
+      toggle.setAttribute("aria-pressed", "true");
+    } else {
+      label.textContent = status === "denied" ? "マイクが許可されていません" : "マイクを使えません";
+      window.setTimeout(() => (label.textContent = "声で溜める"), 2600);
+    }
+  });
+}
+
 // iOS Safari は https でないページに DeviceMotionEvent 自体を公開しない。参照するだけで ReferenceError になり、
 // 導入ゲートの後続（音声の起動）ごと止まっていた ─ iPhone で全く無音だった原因（?debug の診断で実測）
 function requestMotionPermission(): void {
@@ -1224,8 +1338,8 @@ function updateBeatPulse(amp: number, now: number): void {
 // ---- オーバーチャージの稲妻（核から走る赤い放電。毎フレーム形が変わる）----
 
 function drawOvercharge(ctx: CanvasRenderingContext2D, amount: number): void {
-  const cx = pointerX;
-  const cy = pointerY;
+  const cx = chargeX;
+  const cy = chargeY;
   // 赤熱する核
   const coreRadius = 18 + 34 * amount * (0.85 + Math.random() * 0.3);
   ctx.fillStyle = `rgba(255,60,30,${0.12 + 0.3 * amount})`;
@@ -1260,8 +1374,8 @@ function drawOvercharge(ctx: CanvasRenderingContext2D, amount: number): void {
 // ---- 溜めの進行表示（ポインタの周りの円弧 + 心拍の脈動）----
 
 function drawChargeRing(p: p5): void {
-  const cx = pointerX;
-  const cy = pointerY;
+  const cx = chargeX;
+  const cy = chargeY;
   const tremble = overchargeAmount * 4;
   const r = CHARGE_RING_RADIUS + p.random(-tremble, tremble);
   const start = -Math.PI / 2;
@@ -1373,9 +1487,12 @@ const sketch = (p: p5) => {
     createGlowLayer(canvasRenderer.elt.parentElement as HTMLElement);
     createResidueLayer();
     initWordUi();
+    initVoiceUi();
 
     pointerX = p.width / 2;
     pointerY = p.height / 2;
+    chargeX = pointerX;
+    chargeY = pointerY;
     prevPointerX = pointerX;
     prevPointerY = pointerY;
 
@@ -1419,6 +1536,8 @@ const sketch = (p: p5) => {
       onscreen: particles.filter((particle) => !particle.isOffscreen(window.innerWidth, window.innerHeight)).length,
       drawMs: drawMsAverage,
       tier: currentTier,
+      chargeSource,
+      voiceLevel,
       scene: currentScene().name,
       bigReleaseCount,
       residuePoints: residuePoints.length,
@@ -1444,6 +1563,7 @@ const sketch = (p: p5) => {
   p.draw = () => {
     const drawStart = performance.now();
     updatePerfAutoScale(p);
+    updateVoice(p, p.millis());
     updateState(p);
     updateSecondaryBursts(p, p.millis());
     updateSeeds(p);
@@ -1493,10 +1613,11 @@ const sketch = (p: p5) => {
     f.hoverY = pointerY;
     if (state === "charging") {
       f.level = level;
-      f.attractorX = pointerX;
-      f.attractorY = pointerY;
+      f.attractorX = chargeX;
+      f.attractorY = chargeY;
       // オーバーチャージ中は軌道半径が脈打って不安定になる
-      const breathing = 1 + overchargeAmount * 1.6 * Math.sin(p.frameCount * 0.9);
+      const breathing =
+        1 + overchargeAmount * 1.6 * Math.sin(p.frameCount * 0.9) + (chargeSource === "voice" ? voiceLevel * 0.9 : 0); // 声で核が膨らむ
       f.minOrbit = lerp(MIN_ORBIT_RADIUS_MAX, MIN_ORBIT_RADIUS_MIN, level) * breathing;
       f.pullStrength = lerp(PULL_STRENGTH_MIN, PULL_STRENGTH_MAX, level);
       f.swirl = TIER_SWIRL[currentTier];

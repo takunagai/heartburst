@@ -135,6 +135,19 @@ export const HOVER_BRIGHTEN = 45; // カーソル近傍の粒子の輝度加算
 export const SHAKE_RELEASE_ACCEL = 17; // スマホを振って解放する加速度（m/s²、重力除く）
 
 // ------------------------------------------------------------
+// 声で溜める（E3・任意機能。マイクの音量だけを使い、録音・送信はしない）
+// ------------------------------------------------------------
+export const VOICE_FLOOR_DB = -50; // これ以下の音量は 0（環境音）
+export const VOICE_CEIL_DB = -12; // これ以上の音量は 1（叫び）
+export const VOICE_START_LEVEL = 0.35; // この声量が VOICE_START_HOLD_MS 続いたら溜め開始
+export const VOICE_START_HOLD_MS = 120; // 咳・物音で誤発動しないための持続時間
+export const VOICE_STOP_LEVEL = 0.15; // これ未満が VOICE_RELEASE_SILENCE_MS 続いたら解放
+export const VOICE_RELEASE_SILENCE_MS = 280;
+export const VOICE_CHARGE_RATE = 0.012; // 1 フレームあたりの溜め（声量 1 で約 1.4 秒で満充填）
+export const VOICE_BOOST_PER_FRAME = 0.006; // 長押し中の声による溜めの加速
+export const VOICE_REARM_MS = 1500; // 爆発後、自分の爆発音で声の溜めが誤発動しないよう待つ時間
+
+// ------------------------------------------------------------
 // 粒子数の自動調整（Phase 4）
 //
 // 起動後 FPS_SAMPLE_FRAMES フレームの実測 deltaTime から fps を求め、

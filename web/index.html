@@ -36,6 +36,17 @@
     <div id="sketch-container"></div>
     <!-- 言葉を書いて、壊す（入力はブラウザ内だけで扱い、送信・保存しない） -->
     <div id="word-ui">
+      <!-- 声で溜める（マイクの音量だけを使い、録音・送信しない）。https / localhost でのみ表示 -->
+      <button
+        id="voice-toggle"
+        type="button"
+        aria-pressed="false"
+        title="マイクの音量だけを使います（録音・送信はしません）"
+        hidden
+      >
+        <span id="voice-label">声で溜める</span>
+        <span id="voice-meter" aria-hidden="true"></span>
+      </button>
       <button id="word-toggle" type="button">言葉を書いて、壊す</button>
       <form id="word-form" hidden>
         <input
