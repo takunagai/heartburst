@@ -11,11 +11,29 @@ export interface ReleaseTiming {
   dropSec: number; // 着弾後のドロップ区間の長さ（0 = ドロップなし）
 }
 
+// 爆発の種類: 通常 / クリティカル（心拍の頂点で解放）/ 暴発（オーバーチャージ満了）
+export type BurstStyle = "normal" | "critical" | "overload";
+
+export interface ReleaseParams {
+  level: number; // 溜めレベル 0..1
+  power: number; // 威力（1 を超えうる: オーバーチャージ・クリティカルの加算込み）
+  x: number; // 0..1 正規化
+  y: number;
+  style: BurstStyle;
+  directionX: number; // スリングショットの弾き方向（単位ベクトル。無ければ 0）
+  directionY: number;
+  directionAmount: number; // 指向性の強さ 0..1
+}
+
 export interface AudioEngine {
   start(): Promise<void>;
   chargeStart(x: number, y: number): void; // x,y は 0..1 正規化
   chargeLevel(level: number): void; // 毎フレーム呼ばれてよい
-  release(level: number, x: number, y: number): ReleaseTiming;
+  tierUp(tier: number): void; // 段階チャージの閾値を越えた（1..3）
+  overcharge(amount: number): void; // 満充填後の保持 0..1（毎フレーム。0 で停止）
+  getHeartbeatPhase(): number; // 直近の心拍からの位相 0..1（0 = 鳴った瞬間）
+  release(params: ReleaseParams): ReleaseTiming;
+  sparkBurst(x: number, intensity: number, style: BurstStyle): void; // 二次爆発（花火の連鎖）
   pop(x: number, y: number): void;
   setEnergy(energy: number): void; // decay 中 1→0
   getAmp(): number; // マスター振幅 0..1
@@ -25,9 +43,15 @@ export class NoopAudioEngine implements AudioEngine {
   async start(): Promise<void> {}
   chargeStart(): void {}
   chargeLevel(): void {}
-  release(level: number): ReleaseTiming {
-    return { impactDelaySec: 0.04 + 0.1 * level, dropSec: 0 };
+  tierUp(): void {}
+  overcharge(): void {}
+  getHeartbeatPhase(): number {
+    return (performance.now() % 500) / 500;
   }
+  release(params: ReleaseParams): ReleaseTiming {
+    return { impactDelaySec: 0.04 + 0.1 * params.level, dropSec: 0 };
+  }
+  sparkBurst(): void {}
   pop(): void {}
   setEnergy(): void {}
   getAmp(): number {

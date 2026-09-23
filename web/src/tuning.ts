@@ -9,7 +9,7 @@
 
 export const PARTICLE_COUNT = 4000; // PARTICLE_COUNT
 export const POP_SPARK_COUNT = 20; // POP_SPARK_COUNT
-export const MAX_SHOCKWAVES = 9; // 1 回の解放で先行波・本波・残響波の 3 本を使う（Phase 9-1）
+export const MAX_SHOCKWAVES = 16; // 解放 1 回で 3〜6 本（先行波・本波・残響波 + 特殊）+ 段階チャージの輪
 
 export const BG_COLOR_HEX = "#050508"; // BG_COLOR
 export const COLOR_CYAN_HEX = "#00E5FF"; // COLOR_CYAN
@@ -102,6 +102,33 @@ export const GLOW_DOWNSCALE = 6; // 本体の 1/6 解像度
 export const GLOW_BLUR_PX = 2.5; // 縮小キャンバス上のぼかし半径（ctx.filter 非対応環境では縮小・拡大の補間だけで代替）
 export const GLOW_OPACITY_IDLE = 0.35;
 export const GLOW_OPACITY_PEAK = 0.95;
+
+// ------------------------------------------------------------
+// 溜めのドラマとゲーム性（Phase 9-2）
+// ------------------------------------------------------------
+export const CHARGE_TIERS = [0.33, 0.66, 1.0] as const; // 段階チャージの閾値
+export const TIER_SWIRL = [0.12, 0.3, 0.55, 0.85] as const; // 段階ごとの渦の強さ（接線方向の力 / 引力比）
+export const CHARGE_RING_RADIUS = 46; // 溜めの進行を示す円弧の半径
+
+export const OVERCHARGE_MS = 2600; // 満充填からこの時間保持し続けると暴発
+export const OVERCHARGE_POWER_BONUS = 0.35; // オーバーチャージ満了時の威力加算（power = 1 + bonus × o）
+export const OVERCHARGE_SHAKE = 9; // オーバーチャージ満了時の常時揺れ
+export const OVERCHARGE_HUE = 8; // オーバーチャージで寄っていく色相（赤）
+
+export const CRITICAL_MIN_LEVEL = 0.5; // これ以上溜めた解放だけクリティカル判定する
+export const CRITICAL_WINDOW = 0.12; // 心拍の位相がこの範囲（拍の前後）で離せばクリティカル（溜め中は金の輪で合図）
+export const CRITICAL_POWER_BONUS = 0.15;
+export const CRITICAL_HUE = 45; // 金
+
+export const SLINGSHOT_MIN_SPEED = 0.9; // 離す直前の弾き速度（px/ms）がこれ以上で指向性爆発
+export const SLINGSHOT_MAX_SPEED = 4.0; // この速度で指向性が最大
+export const SLINGSHOT_SAMPLE_MS = 70; // 弾き速度を測る直前区間
+
+export const HOVER_RADIUS = 130; // idle 中、カーソル周りの粒子が避ける半径
+export const HOVER_FORCE = 0.35;
+export const HOVER_BRIGHTEN = 45; // カーソル近傍の粒子の輝度加算
+
+export const SHAKE_RELEASE_ACCEL = 17; // スマホを振って解放する加速度（m/s²、重力除く）
 
 // ------------------------------------------------------------
 // 粒子数の自動調整（Phase 4）

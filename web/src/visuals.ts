@@ -8,6 +8,9 @@
 //   - 爆発中は端ワープせず画面外へ飛散 → 端から再流入
 //   - 色温度（溜めで白熱、爆発で全色相へ散って戻る）
 //   - 衝撃波 3 層（先行波・本波・残響波）と波面による粒子の押し出し
+// Phase 9-2:
+//   - 段階チャージの渦、オーバーチャージの不安定化と赤熱、カーソルを避ける idle 粒子
+//   - 爆発の種類別の配色（クリティカル = 金 / 暴発 = 赤）とスリングショットの指向性インパルス
 // ============================================================
 
 import type p5 from "p5";
@@ -37,7 +40,13 @@ import {
   SHOCKWAVE_ECHO_DELAY_FRAMES,
   CHARGE_DESATURATE,
   BURST_HUE_SPREAD,
+  HOVER_RADIUS,
+  HOVER_FORCE,
+  HOVER_BRIGHTEN,
+  OVERCHARGE_HUE,
+  CRITICAL_HUE,
 } from "./tuning";
+import type { BurstStyle } from "./audio/engine";
 
 const TWO_PI = Math.PI * 2;
 
@@ -59,6 +68,24 @@ export interface FrameParams {
   amp: number; // マスター振幅（グロー脈動用）
   width: number;
   height: number;
+  swirl: number; // 溜め中の渦の強さ（接線方向の力 / 引力比）
+  overcharge: number; // 満充填後の保持 0..1
+  isHovering: boolean; // idle 中にカーソルが画面上で動いている
+  hoverX: number;
+  hoverY: number;
+  burstStyle: BurstStyle;
+}
+
+// 色相の最短経路での補間（300° → 8° を緑経由にしない）
+function lerpHue(from: number, to: number, t: number): number {
+  const diff = ((((to - from) % 360) + 540) % 360) - 180;
+  return from + diff * t;
+}
+
+function burstHue(style: BurstStyle): number | null {
+  if (style === "critical") return CRITICAL_HUE;
+  if (style === "overload") return OVERCHARGE_HUE;
+  return null;
 }
 
 // ------------------------------------------------------------
@@ -118,6 +145,7 @@ export class Particle {
   satVal: number;
   briBase: number;
   spectrumOffset: number; // 爆発直後に散る色相のずれ
+  proximity = 0; // idle 中のカーソルへの近さ 0..1（輝度加算用）
 
   private p: p5;
 
@@ -174,21 +202,31 @@ export class Particle {
   }
 
   // pop（小破裂）用: 既存粒子を指定座標へワープさせ、放射状の初速を与える
-  popSpark(px: number, py: number): void {
+  popSpark(px: number, py: number, speedScale = 1): void {
     this.x = px;
     this.y = py;
     const ang = this.p.random(TWO_PI);
-    const spd = this.p.random(POP_SPARK_SPEED_MIN, POP_SPARK_SPEED_MAX);
+    const spd = this.p.random(POP_SPARK_SPEED_MIN, POP_SPARK_SPEED_MAX) * speedScale;
     this.vx = Math.cos(ang) * spd;
     this.vy = Math.sin(ang) * spd;
   }
 
-  // release（解放）用: 爆心からの放射インパルスを与える
-  applyImpulse(cx: number, cy: number, releaseLevel: number): void {
+  // release（解放）用: 爆心からの放射インパルスを与える。
+  // power > 1（オーバーチャージ・クリティカル）はその比で速度を上乗せ。
+  // 弾き方向があれば、その向きの粒子ほど速く・全体を同じ向きへ流す（スリングショット）
+  applyImpulse(cx: number, cy: number, power: number, dirX: number, dirY: number, dirAmount: number): void {
     const dx = this.x - cx;
     const dy = this.y - cy;
     const d = Math.hypot(dx, dy) + 0.001;
-    const speed = this.p.lerp(IMPULSE_SPEED_MIN, IMPULSE_SPEED_MAX, releaseLevel) * this.p.random(0.7, 1.3);
+    const base = IMPULSE_SPEED_MIN + (IMPULSE_SPEED_MAX - IMPULSE_SPEED_MIN) * Math.min(power, 1);
+    // 威力 1 超過ぶんは控えめに上乗せ（全粒子が画面外へ抜けて画面が空になるのを防ぐ。派手さは二次爆発・色・輪で出す）
+    let speed = base * (1 + Math.max(power - 1, 0) * 0.35) * this.p.random(0.7, 1.3);
+    if (dirAmount > 0) {
+      const alignment = (dx / d) * dirX + (dy / d) * dirY; // -1..1
+      speed *= 1 + dirAmount * alignment * 0.9;
+      this.vx += dirX * base * dirAmount * 0.55;
+      this.vy += dirY * base * dirAmount * 0.55;
+    }
     this.vx += (dx / d) * speed;
     this.vy += (dy / d) * speed;
   }
@@ -197,6 +235,7 @@ export class Particle {
     switch (f.state) {
       case "idle":
         this.flowDrift(1.0, 1.0);
+        this.hoverRepel(f);
         this.x += this.vx;
         this.y += this.vy;
         this.wrapEdges(f.width, f.height);
@@ -214,6 +253,7 @@ export class Particle {
         this.vx *= f.friction;
         this.vy *= f.friction;
         this.flowDrift(0.35, f.timeScale); // 摩擦をかけつつ緩やかにフローへ回帰
+        this.hoverRepel(f);
         this.x += this.vx * f.timeScale;
         this.y += this.vy * f.timeScale;
         this.escapeEdges(f.width, f.height);
@@ -250,6 +290,22 @@ export class Particle {
     this.vy += (this.targetVy - this.vy) * t;
   }
 
+  // カーソルの周りだけ粒子がそっと避ける（触る前から「生きている」と感じさせる）
+  private hoverRepel(f: FrameParams): void {
+    this.proximity = 0;
+    if (!f.isHovering) return;
+    const dx = this.x - f.hoverX;
+    const dy = this.y - f.hoverY;
+    if (Math.abs(dx) > HOVER_RADIUS || Math.abs(dy) > HOVER_RADIUS) return;
+    const d = Math.hypot(dx, dy) + 0.001;
+    if (d > HOVER_RADIUS) return;
+    const closeness = 1 - d / HOVER_RADIUS;
+    this.proximity = closeness;
+    const force = HOVER_FORCE * closeness * closeness;
+    this.vx += (dx / d) * force;
+    this.vy += (dy / d) * force;
+  }
+
   private chargingPull(f: FrameParams): void {
     const dx = f.attractorX - this.x;
     const dy = f.attractorY - this.y;
@@ -258,11 +314,22 @@ export class Particle {
     if (d > f.minOrbit) {
       this.vx += (dx / d) * f.pullStrength;
       this.vy += (dy / d) * f.pullStrength;
+      // 渦: 引力に直交する成分（段階が上がるほど銀河のような渦巻きになる）
+      this.vx += (-dy / d) * f.pullStrength * f.swirl;
+      this.vy += (dx / d) * f.pullStrength * f.swirl;
     } else {
-      // 軌道内では反発ジッターに切り替え、収束しすぎを防ぐ
-      const jitter = JITTER_AMOUNT * f.level;
+      // 軌道内では反発ジッターに切り替え、収束しすぎを防ぐ。オーバーチャージで暴れる
+      const jitter = JITTER_AMOUNT * (f.level + f.overcharge * 2.5);
       this.vx += (Math.random() * 2 - 1) * jitter;
       this.vy += (Math.random() * 2 - 1) * jitter;
+    }
+
+    // オーバーチャージ: 核から火花が噴き出しては引き戻される（抑えきれないエネルギー）
+    if (f.overcharge > 0 && Math.random() < f.overcharge * 0.006) {
+      const angle = Math.random() * TWO_PI;
+      const kick = 14 + 26 * f.overcharge * Math.random();
+      this.vx += Math.cos(angle) * kick;
+      this.vy += Math.sin(angle) * kick;
     }
 
     this.vx *= CHARGE_DAMPING;
@@ -294,8 +361,13 @@ export class Particle {
 
     switch (f.state) {
       case "idle":
-        bri = this.briBase * 0.5;
-        alphaVal = 18;
+        bri = Math.min(100, this.briBase * 0.72 + this.proximity * HOVER_BRIGHTEN);
+        alphaVal = 34 + this.proximity * 45;
+        if (Math.random() < 0.002) {
+          // ときどき瞬く（静止画に見えないように）
+          bri = 100;
+          alphaVal = 80;
+        }
         break;
       case "charging": {
         const l = f.level;
@@ -303,6 +375,11 @@ export class Particle {
         alphaVal = 28 + 60 * l;
         sizeMul = 1.0 + 0.6 * l;
         sat = this.satVal * (1 - CHARGE_DESATURATE * l * l); // 白熱
+        if (f.overcharge > 0) {
+          // 白熱から赤熱へ（危険の合図）
+          hue = lerpHue(hue, OVERCHARGE_HUE + this.spectrumOffset * 0.05, f.overcharge);
+          sat = sat + (95 - sat) * f.overcharge * 0.85;
+        }
         break;
       }
       case "inhale":
@@ -315,11 +392,26 @@ export class Particle {
       case "decay": {
         const speedNorm = Math.min(Math.hypot(this.vx, this.vy) / DECAY_SPEED_REF, 1);
         const burstMix = f.energy * f.energy; // 爆発直後ほど全色相へ散る
-        hue = this.hueVal + this.spectrumOffset * burstMix;
+        const styleHue = burstHue(f.burstStyle);
+        if (styleHue === null) {
+          hue = this.hueVal + this.spectrumOffset * burstMix;
+        } else {
+          // クリティカル = 金、暴発 = 赤に染まり、残光で元の色へ戻る
+          hue = lerpHue(this.hueVal, styleHue + this.spectrumOffset * 0.12, Math.min(f.energy * 1.4, 1));
+        }
         sat = this.satVal + (100 - this.satVal) * burstMix * 0.5;
-        bri = this.briBase * 0.5 + (100 - this.briBase * 0.5) * speedNorm;
-        bri = Math.min(100, bri + f.amp * 25); // 音の振幅によるグロー脈動
-        alphaVal = 20 + 62 * speedNorm;
+        // 余韻: 減速しても energy に比例した明るさを保つ（ドロップ区間のあいだ画面が暗くならないように）
+        const glowNorm = Math.max(speedNorm, f.energy * 0.65);
+        bri = this.briBase * 0.55 + (100 - this.briBase * 0.55) * glowNorm;
+        bri = Math.min(100, bri + f.amp * 25 + this.proximity * HOVER_BRIGHTEN); // 音の振幅によるグロー脈動
+        alphaVal = 26 + 62 * glowNorm + this.proximity * 30;
+        sizeMul = 1 + f.amp * f.energy * 1.4; // キックに合わせて脈打つ
+        // 減速した粒子はきらめく（花火の残り火）。爆発直後ほど多い
+        if (speedNorm < 0.4 && Math.random() < 0.06 * f.energy) {
+          bri = 100;
+          alphaVal = 95;
+          sizeMul = 1.6;
+        }
         break;
       }
     }
@@ -352,7 +444,7 @@ export class Particle {
 //   echo : 遅れて出るシアンの残響波
 // 配列使い回し（非活性個体を再利用）。
 // ------------------------------------------------------------
-export type ShockwaveKind = "lead" | "main" | "echo";
+export type ShockwaveKind = "lead" | "main" | "echo" | "tier";
 
 export class Shockwave {
   active = false;
@@ -365,6 +457,8 @@ export class Shockwave {
   alphaVal = 0;
   level = 0;
   delayFrames = 0;
+  hue = 0;
+  sat = 0;
 
   private p: p5;
 
@@ -372,7 +466,8 @@ export class Shockwave {
     this.p = p;
   }
 
-  start(px: number, py: number, level: number, kind: ShockwaveKind): void {
+  // hue/sat を省略すると種類ごとの既定色（lead = 白 / main = マゼンタ / echo = シアン）
+  start(px: number, py: number, level: number, kind: ShockwaveKind, hue?: number, sat?: number, delayFrames = 0): void {
     const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
     const baseMax = lerp(SHOCKWAVE_RADIUS_MIN, SHOCKWAVE_RADIUS_MAX, level);
     this.active = true;
@@ -390,12 +485,27 @@ export class Shockwave {
       this.maxRadius = baseMax;
       this.strokeW = lerp(3, 18, level);
       this.alphaVal = 100;
-    } else {
+    } else if (kind === "echo") {
       this.maxRadius = baseMax * 0.75;
       this.strokeW = lerp(2, 8, level);
       this.alphaVal = 60;
       this.delayFrames = SHOCKWAVE_ECHO_DELAY_FRAMES;
+    } else {
+      // tier: 段階チャージの節目の輪（小さく速い）
+      this.radius = 40;
+      this.maxRadius = 170 + 60 * level;
+      this.strokeW = 2 + 2 * level;
+      this.alphaVal = 90;
     }
+    const defaults: Record<ShockwaveKind, [number, number]> = {
+      lead: [0, 0],
+      main: [318, 80],
+      echo: [190, 70],
+      tier: [190, 60],
+    };
+    this.hue = hue ?? defaults[kind][0];
+    this.sat = sat ?? defaults[kind][1];
+    this.delayFrames += delayFrames;
   }
 
   get isPushing(): boolean {
@@ -415,9 +525,12 @@ export class Shockwave {
     } else if (this.kind === "main") {
       this.radius += (gap * 0.08 + 6) * timeScale;
       this.alphaVal *= Math.pow(0.93, timeScale);
-    } else {
+    } else if (this.kind === "echo") {
       this.radius += (gap * 0.05 + 4) * timeScale;
       this.alphaVal *= Math.pow(0.94, timeScale);
+    } else {
+      this.radius += (gap * 0.16 + 3) * timeScale;
+      this.alphaVal *= Math.pow(0.88, timeScale);
     }
     this.strokeW *= Math.pow(0.965, timeScale);
     if (this.alphaVal < 1.5 || this.radius >= this.maxRadius) {
@@ -440,13 +553,7 @@ export class Shockwave {
   display(): void {
     if (!this.active || this.delayFrames > 0) return;
     this.p.noFill();
-    if (this.kind === "lead") {
-      this.p.stroke(0, 0, 100, this.alphaVal);
-    } else if (this.kind === "main") {
-      this.p.stroke(318, 80, 100, this.alphaVal);
-    } else {
-      this.p.stroke(190, 70, 100, this.alphaVal);
-    }
+    this.p.stroke(this.hue, this.sat, 100, this.alphaVal);
     this.p.strokeWeight(Math.max(0.5, this.strokeW));
     this.p.ellipse(this.x, this.y, this.radius * 2, this.radius * 2);
   }
