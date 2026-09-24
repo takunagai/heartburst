@@ -585,6 +585,16 @@ body.is-charging #word-ui {
   color: rgba(232, 251, 255, 0.5);
 }
 
+.manual-footer a {
+  color: inherit;
+  text-underline-offset: 2px;
+}
+
+.manual-footer a:hover,
+.manual-footer a:focus-visible {
+  color: rgba(232, 251, 255, 0.85);
+}
+
 /* 線画アイコン: シアン → 青 → マゼンタと行ごとに色を送る */
 .icon {
   flex: none;

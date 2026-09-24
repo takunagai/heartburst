@@ -57,6 +57,10 @@ cd web && pnpm install && pnpm dev
 | `?` キー / 右下の「?」/ タイトルの How to Play | 遊び方（日英。ブラウザの言語で自動選択、トグルで切り替え） |
 | `d` キー | デバッグ HUD |
 
+### ライセンス（AGPLv3）
+
+ウェブ版（`web/`）は [AGPLv3](web/LICENSE) で公開している。音楽パターン層に使っている [Strudel](https://strudel.cc/) が AGPLv3 のためだ。AGPLv3 は、ネット越しに使わせるだけでも利用者にソースを提供する義務を課し、組み込む側のコードも同じライセンスにすることを求める。そこで本リポジトリをソースの提供先とし、作品の遊び方カードの末尾とコンソールにリンクを出している。ネイティブ版（`sc/`・`processing/`・`tidal/`）は Strudel を使っていない。
+
 チューニング定数は `web/src/tuning.ts`（演出）、`web/src/music.ts`（音程・コード進行）、`web/src/scenes.ts`（場面）、`web/src/audio/heartburst-engine.ts` 冒頭（音響）。
 
 ## チューニング

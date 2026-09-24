@@ -113,8 +113,8 @@ const audio = createAudioEngine();
 // チューニング・検証用に露出（本番でも害はない読み取り専用ハンドル）
 (window as unknown as { __heartburstAudio: unknown }).__heartburstAudio = audio;
 
-// AGPLv3（web/LICENSE）ソース公開の表記。リポジトリ URL は Phase 5 の公開時に確定
-console.info("Heartburst ─ licensed under AGPLv3. source: TBD");
+// AGPLv3（web/LICENSE）ソース公開の表記。画面上は遊び方カードの末尾にも同じリンクがある
+console.info("Heartburst ─ licensed under AGPLv3. source: https://github.com/takunagai/heartburst");
 
 // ---- 状態機械 ----
 
