@@ -13,7 +13,7 @@
 //   - オーバーチャージ: 満充填後も保持すると赤熱・Shepard トーン・揺れが増し、満了で暴発（overload）
 //   - クリティカル: 心拍の頂点付近で離すと金の爆発（critical）
 //   - スリングショット: 離す直前の弾き速度で爆発に向きが付く
-//   - idle の粒子はカーソルを避ける / スマホは振って解放・振動フィードバック
+//   - idle の粒子はカーソルを避ける / スマホは振動フィードバック
 //
 // Phase 9-3（楽器・音楽）:
 //   - タップは位置で音程が決まり（x = 音階、y = オクターブ）、その場に「種」が残る
@@ -91,7 +91,6 @@ import {
   SLINGSHOT_MIN_SPEED,
   SLINGSHOT_MAX_SPEED,
   SLINGSHOT_SAMPLE_MS,
-  SHAKE_RELEASE_ACCEL,
   VOICE_START_LEVEL,
   VOICE_START_HOLD_MS,
   VOICE_STOP_LEVEL,
@@ -913,21 +912,6 @@ function handlePointerUp(p: p5): void {
   }
 }
 
-// スマホを振って解放: 溜め中に一定以上の加速度が来たら、その向きへのスリングショットとして解放する
-function handleDeviceMotion(p: p5, event: DeviceMotionEvent): void {
-  if (state !== "charging" || level < 0.3) return;
-  const a = event.acceleration;
-  if (!a || a.x === null || a.y === null) return;
-  const magnitude = Math.hypot(a.x, a.y, a.z ?? 0);
-  if (magnitude < SHAKE_RELEASE_ACCEL) return;
-  // 端末座標系は y が上向き。画面座標（y 下向き）へ反転する
-  const length = Math.hypot(a.x, a.y) || 1;
-  const [nx, ny] = normalize(chargeX, chargeY, p.width, p.height);
-  isPointerDown = false;
-  beginRelease(p, nx, ny, undefined, { dirX: a.x / length, dirY: -a.y / length, amount: 0.8 });
-}
-
-// iOS 13+ はモーションセンサーの利用にユーザー操作起点の許可要求が必要
 // 溜め〜着弾の間は右下のボタン群を薄くする（CSS: body.is-charging）。状態が変わったときだけ DOM に触る
 let isChargingClassOn = false;
 
@@ -1014,17 +998,6 @@ function initVoiceUi(): void {
   });
 }
 
-// iOS Safari は https でないページに DeviceMotionEvent 自体を公開しない。参照するだけで ReferenceError になり、
-// 導入ゲートの後続（音声の起動）ごと止まっていた ─ iPhone で全く無音だった原因（?debug の診断で実測）
-function requestMotionPermission(): void {
-  if (typeof DeviceMotionEvent === "undefined") return;
-  const motion = DeviceMotionEvent as unknown as { requestPermission?: () => Promise<string> };
-  if (typeof motion.requestPermission !== "function") return;
-  motion.requestPermission().catch(() => {
-    // 拒否されても振って解放が使えないだけ。本体は動く
-  });
-}
-
 // ---- 導入オーバーレイ（初回 pointerdown で AudioContext を起動しつつ
 // そのまま 1 回目のチャージへ繋げる）----
 
@@ -1038,8 +1011,6 @@ function initOverlayGate(p: p5): void {
     overlay.classList.add("overlay--hidden");
     hasStarted = true;
     document.getElementById("word-ui")?.classList.add("is-ready");
-    // モーションセンサーの許可要求もユーザー操作の中でしか通らない。タッチは指を離した時が該当するので touchend で呼ぶ
-    if (event.pointerType === "touch") window.addEventListener("touchend", requestMotionPermission, { once: true });
 
     // 音声の起動（Strudel 読み込み・プラック合成）を待つ間に指が離れていたら、溜めでなくタップとして扱う。
     // 待たずに溜めへ入ると、離し済みのため次のタップまで charging から抜けられない（低速端末で実測）
@@ -1212,51 +1183,29 @@ function drawProgressDots(p: p5): void {
 
 // ---- 言葉を書いて、壊す ----
 
-// iPhone / iPad（iPadOS はデスクトップ Safari を名乗るので、タッチ点数で見分ける）
-function isIos(): boolean {
-  return /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
-}
-
+// ページ内の入力欄で受ける（OS 標準の window.prompt は開いている間スクリプトが止まり、音も止まる）
 function initWordUi(): void {
   const toggle = document.getElementById("word-toggle");
   const form = document.getElementById("word-form") as HTMLFormElement | null;
-  let input = document.getElementById("word-input") as HTMLInputElement | null;
+  const input = document.getElementById("word-input") as HTMLInputElement | null;
   if (!toggle || !form || !input) return;
 
-  const bindInput = (element: HTMLInputElement) => {
-    element.maxLength = WORD_MAX_LENGTH;
-    element.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") close();
-    });
-    element.addEventListener("blur", () => {
-      if (!element.value.trim()) close();
-    });
-  };
-
-  // 閉じるたびに入力欄を新しい要素に差し替える。iOS は入力の履歴が残っていると、
-  // 端末を振ったときに「取り消す - 入力」を出す（振って解放と衝突した ─ 実機報告）
   const close = () => {
-    if (form.hidden || !input) return; // 差し替えに伴う blur からの再入を防ぐ
+    if (form.hidden) return; // blur からの再入を防ぐ
     form.hidden = true;
     toggle.hidden = false;
+    input.value = "";
     input.blur();
-    const fresh = input.cloneNode(false) as HTMLInputElement;
-    fresh.value = "";
-    input.replaceWith(fresh);
-    input = fresh;
-    bindInput(fresh);
   };
 
-  bindInput(input);
+  input.maxLength = WORD_MAX_LENGTH;
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  input.addEventListener("blur", () => {
+    if (!input.value.trim()) close();
+  });
   toggle.addEventListener("click", () => {
-    if (!input) return;
-    if (isIos()) {
-      // iOS はページ内の入力欄で打った履歴が要素を差し替えても残り、端末を振ると「取り消す - 入力」を出す
-      // （振って解放と衝突 ─ 入力欄の差し替えでは消えなかった実機報告）。OS 標準の入力ダイアログなら履歴がページに残らない
-      const word = window.prompt(t("word.prompt"), "")?.trim().slice(0, WORD_MAX_LENGTH);
-      if (word) formWord(word);
-      return;
-    }
     toggle.hidden = true;
     form.hidden = false;
     input.value = "";
@@ -1264,7 +1213,7 @@ function initWordUi(): void {
   });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const word = input?.value.trim() ?? "";
+    const word = input.value.trim();
     close();
     if (word) formWord(word);
   });
@@ -1566,7 +1515,6 @@ const sketch = (p: p5) => {
     document.documentElement.addEventListener("pointerleave", () => {
       lastHoverMoveMillis = Number.NEGATIVE_INFINITY;
     });
-    window.addEventListener("devicemotion", (event) => handleDeviceMotion(p, event));
 
     initOverlayGate(p);
     // 導入画面を読んでいる間に Strudel を先読み（最初の数フレームの描画と競合しないよう少し遅らせる）

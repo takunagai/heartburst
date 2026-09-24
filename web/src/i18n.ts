@@ -41,7 +41,6 @@ const MESSAGES = {
   "word.toggle": { ja: "言葉を書いて、壊す", en: "Write it, break it" },
   "word.placeholder": { ja: "モヤモヤを書いて Enter", en: "Type what weighs on you, then Enter" },
   "word.aria": { ja: "壊したい言葉", en: "Words to break" },
-  "word.prompt": { ja: "壊したい言葉（モヤモヤ）を書いてください", en: "Write the words you want to shatter" },
 
   "manual.title": { ja: "遊び方", en: "How to Play" },
   "manual.close": { ja: "閉じる", en: "Close" },
@@ -58,10 +57,9 @@ const MESSAGES = {
   "manual.flick": { ja: "離す瞬間に弾く → その方向へ飛ぶ", en: "Flick as you let go → blast that way" },
   "manual.chain": { ja: "爆発で種を巻き込む → 連鎖して旋律に", en: "Catch seeds in a blast → a chain melody" },
   "manual.finale": { ja: "強い解放 7 回（画面下の点）→ 大団円", en: "7 strong releases (dots below) → Finale" },
-  "manual.extras": { ja: "右下のボタン・スマホ", en: "Buttons & phone" },
+  "manual.extras": { ja: "右下のボタン", en: "Buttons" },
   "manual.word": { ja: "言葉を書いて、壊す ─ 言葉を粒子にして砕く", en: "Write it, break it ─ shatter your words" },
   "manual.voice": { ja: "声で溜める ─ 叫んで溜め、黙ると爆発", en: "Voice charge ─ shout to charge, hush to blast" },
-  "manual.shake": { ja: "溜めながらスマホを振る → 解放", en: "Shake your phone while charging → release" },
   "manual.footer": {
     ja: "音が鳴ります ・ 入力した言葉と声は送信・保存しません",
     en: "Sound on · Your words and voice are never sent or stored",

@@ -132,7 +132,6 @@ export const HOVER_RADIUS = 130; // idle 中、カーソル周りの粒子が避
 export const HOVER_FORCE = 0.35;
 export const HOVER_BRIGHTEN = 45; // カーソル近傍の粒子の輝度加算
 
-export const SHAKE_RELEASE_ACCEL = 17; // スマホを振って解放する加速度（m/s²、重力除く）
 
 // ------------------------------------------------------------
 // 声で溜める（E3・任意機能。マイクの音量だけを使い、録音・送信はしない）
