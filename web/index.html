@@ -71,7 +71,6 @@
     </div>
     <p id="scene-caption" aria-live="polite"></p>
     <div id="overlay">
-      <div id="overlay-particles" aria-hidden="true"></div>
       <!-- 言語トグル（押しても作品は始まらない） -->
       <div class="lang-toggle overlay-lang" role="group" aria-label="言語" data-i18n-attr="aria-label:lang.group">
         <button type="button" data-lang-option="ja" aria-pressed="true">日本語</button>
@@ -83,6 +82,8 @@
           <img src="/heartburst-logo.webp" alt="Heartburst" width="1200" height="357" decoding="async" fetchpriority="high" />
         </h1>
         <p id="overlay-text" data-i18n="overlay.text">長押しで溜めて、離して解き放つ</p>
+        <!-- 開始の合図（文言はタッチ端末かマウスかで main.ts が切り替える） -->
+        <p id="overlay-start" data-i18n="overlay.start.tap">タップしてスタート</p>
         <p id="overlay-note" data-i18n="overlay.note">音が鳴ります・音量にご注意ください</p>
         <!-- 遊び方（押しても作品は始まらない。読んでからタップで開始） -->
         <button id="overlay-howto" type="button" aria-haspopup="dialog" data-i18n="overlay.howto">How to Play</button>

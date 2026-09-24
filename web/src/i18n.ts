@@ -21,6 +21,8 @@ const MESSAGES = {
 
   "overlay.text": { ja: "長押しで溜めて、離して解き放つ", en: "Hold to charge. Let go to release." },
   "overlay.note": { ja: "音が鳴ります・音量にご注意ください", en: "Sound on ─ mind your volume" },
+  "overlay.start.tap": { ja: "タップしてスタート", en: "Tap to Start" },
+  "overlay.start.click": { ja: "クリックしてスタート", en: "Click to Start" },
   "overlay.howto": { ja: "How to Play", en: "How to Play" },
   "lang.group": { ja: "言語", en: "Language" },
 

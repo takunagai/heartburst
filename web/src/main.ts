@@ -1036,6 +1036,7 @@ function initOverlayGate(p: p5): void {
     event.preventDefault();
     overlay.removeEventListener("pointerdown", onFirstPointerDown);
     overlay.classList.add("overlay--hidden");
+    hasStarted = true;
     document.getElementById("word-ui")?.classList.add("is-ready");
     // モーションセンサーの許可要求もユーザー操作の中でしか通らない。タッチは指を離した時が該当するので touchend で呼ぶ
     if (event.pointerType === "touch") window.addEventListener("touchend", requestMotionPermission, { once: true });
@@ -1176,8 +1177,11 @@ function residueHue(): number {
   return blendHue(frameParams.paletteA, frameParams.paletteB, Math.random());
 }
 
-// 大団円までの進み具合（画面下の点）
+// 大団円までの進み具合（画面下の点）。タイトル画面では出さない（遊び始めてから意味を持つ）
+let hasStarted = false;
+
 function drawProgressDots(p: p5): void {
+  if (!hasStarted) return;
   const spacing = 16;
   // 狭い画面では右下の「言葉を書いて、壊す」と重なるため左下へ寄せる（390px 幅で重なりを実測）
   const isNarrow = p.width < 640;
@@ -1790,6 +1794,9 @@ function initDiagnostics(): void {
 }
 
 initDiagnostics();
+// 開始の合図はタッチ端末なら「タップ」、マウスなら「クリック」（辞書のキーを差し替えてから言語を適用）
+const startLabel = document.getElementById("overlay-start");
+if (startLabel && !window.matchMedia("(pointer: coarse)").matches) startLabel.dataset.i18n = "overlay.start.click";
 initI18n();
 initManual();
 
