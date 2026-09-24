@@ -313,7 +313,16 @@
 - 本番: 新 Worker `heartburst`（https://heartburst.nagai-shouten.workers.dev、版 78b9ee0f）を公開して確認した後、旧 Worker `catharsisfield` を削除（旧 URL は 404）
 - 事故: 削除前に `yes n | wrangler delete` で確認プロンプトの有無だけを見るつもりが、wrangler は非対話環境で「はい」を既定値として通過し削除まで実行した。削除自体はユーザー承認済み・新 URL の確認後だったので実害なし。**破壊的な wrangler コマンドは `--dry-run` / `--help` で調べ、n をパイプで渡す試し方をしない**（memory: wrangler-noninteractive-auto-yes）
 - プロジェクトフォルダ（`~/Projects/Game/visual-art` → `~/Projects/Game/heartburst`）と Claude Code の作業データ・設定・Vault のセッション索引は、Claude Code を終了してから移行スクリプトで移す（起動中に移すと書き込み中の履歴や設定が壊れる／上書きされるため）
-- 別リポジトリ `~/Projects/agent-assets` のスキル interactive-art-builder が参照実装として `~/Projects/visual-art` を 5 か所で指している（元から古いパス）。そのリポジトリのセッションで直す
+- 別リポジトリ `~/Projects/agent-assets` のスキル interactive-art-builder が参照実装として `~/Projects/visual-art` を 5 か所で指している（元から古いパス）。そのリポジトリのセッションで直す（2026-09-24 に完了）
+
+## Phase 14: ソース公開（AGPLv3 の義務を満たす、2026-09-24）
+
+- 経緯: web/ は Strudel（AGPLv3）を組み込むため AGPLv3 でソース公開と 2026-07-13 に決めていたが、リモート未設定のまま本番公開していた（コンソールの表記も `source: TBD`）。ネット越しに使わせるだけで提供義務が生じる AGPL では未充足の状態
+- 公開前の点検: 全履歴で秘密（トークン形式・key=値）の混入なし。作者メールが公開用でない個人アドレスだったため、ユーザー判断で `git filter-repo --mailmap` により全履歴を GitHub の noreply アドレスへ書き換え（事前に `git bundle --all` で退避、リポジトリの user.email も noreply に）。push 前なので書き換えの影響は手元だけ
+- 公開: https://github.com/takunagai/heartburst （public、リポジトリ全体。ネイティブ版は AGPL 対象外だが同居）
+- 表記: 遊び方カードの末尾に「Source (AGPLv3)」リンク、コンソールに URL、README にライセンスの理由を追記。カードは 5 画面サイズでスクロール無しのまま（scrollHeight = clientHeight）
+- 本番デプロイ（版 86513b1e）。本番 HTML にリンク、JS にコンソール表記が入っていることを確認
+- 教訓: **ライセンスの公開義務は「公開時に確定」と TODO にすると、公開だけ先に進んで義務が漏れる**。コピーレフトの依存を入れたら、初回デプロイと同時にソース公開まで済ませる
 
 ## 未解決・保留
 
