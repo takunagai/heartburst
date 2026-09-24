@@ -4,7 +4,7 @@
 
 # Heartburst
 
-旧称 CatharsisField（2026-09-24 改名）。ネイティブ版のフォルダ名（`processing/CatharsisField/`）と公開 URL・Worker 名（`catharsisfield`）は互換のため旧名のまま。
+旧称 CatharsisField（2026-09-24 改名。フォルダ・URL・内部の名前もすべて Heartburst に統一）。
 
 溜めて、放つ。胸の内を弾けさせる、カタルシスのインタラクティブ・アート。
 
@@ -22,7 +22,7 @@
 ./bin/start.sh --no-tidal # Tier 1（SC + Processing のみ）
 ```
 
-終了は Ctrl+C（全プロセスを後始末）。ログは `/tmp/catharsis/`。
+終了は Ctrl+C（全プロセスを後始末）。ログは `/tmp/heartburst/`。
 
 ## 操作
 
@@ -57,7 +57,7 @@ cd web && pnpm install && pnpm dev
 | `?` キー / 右下の「?」/ タイトルの How to Play | 遊び方（日英。ブラウザの言語で自動選択、トグルで切り替え） |
 | `d` キー | デバッグ HUD |
 
-チューニング定数は `web/src/tuning.ts`（演出）、`web/src/music.ts`（音程・コード進行）、`web/src/scenes.ts`（場面）、`web/src/audio/catharsis-engine.ts` 冒頭（音響）。
+チューニング定数は `web/src/tuning.ts`（演出）、`web/src/music.ts`（音程・コード進行）、`web/src/scenes.ts`（場面）、`web/src/audio/heartburst-engine.ts` 冒頭（音響）。
 
 ## チューニング
 
@@ -68,7 +68,7 @@ cd web && pnpm install && pnpm dev
 | マスター音量・リバーブ | `sc/main.scd` 冒頭の `~masterVolume` / `~reverbMix` / `~reverbRoom` / `~reverbDamp`（ライブ調整は `~master.set(\amp, 0.8)` 等） |
 | シャワーの密度・長さ | `sc/main.scd` の `/release` OSCdef 内 `baseDensity`（level→3..14 notes/sec）と `total = 3.0` |
 | ワンショット音量 | `\dropBoom` / `\shockwave` の amp マッピング、`\shimmer` の amp 係数 |
-| 溜め/減衰テンポ・粒子数・演出強度 | `processing/CatharsisField/CatharsisField.pde` 冒頭の定数群（`CHARGE_DURATION_MS` / `DECAY_DURATION_MS` / `PARTICLE_COUNT` ほか） |
+| 溜め/減衰テンポ・粒子数・演出強度 | `processing/Heartburst/Heartburst.pde` 冒頭の定数群（`CHARGE_DURATION_MS` / `DECAY_DURATION_MS` / `PARTICLE_COUNT` ほか） |
 | パターン層の音量・追従感度 | `tidal/performance.tidal` 各レイヤーの `gain` / `lpf` / `degradeBy` の係数 |
 
 ## 依存セットアップ

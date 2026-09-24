@@ -69,7 +69,7 @@ class OscBridge {
   // ---- 受信: SuperCollider → Processing ----
   // oscP5 はコンストラクタに渡したオブジェクト（ここではメインスケッチ = PApplet）
   // に対して public な oscEvent(OscMessage) をリフレクションで探して呼び出す。
-  // そのためイベントの入口は CatharsisField.pde 側の oscEvent() に置き、
+  // そのためイベントの入口は Heartburst.pde 側の oscEvent() に置き、
   // そこから本メソッドへ橋渡しする（受信データの保持・平滑化はここに集約）。
 
   void handleIncoming(OscMessage msg) {

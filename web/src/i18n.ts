@@ -10,7 +10,7 @@
 
 export type Lang = "ja" | "en";
 
-const STORAGE_KEY = "catharsisfield.lang";
+const STORAGE_KEY = "heartburst.lang";
 
 const MESSAGES = {
   "page.title": { ja: "Heartburst ─ 溜めて、放つ。", en: "Heartburst ─ Hold. Let go." },

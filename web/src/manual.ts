@@ -7,7 +7,7 @@
 // - 初回案内: 最初の爆発のあとに「?」を一度だけ脈打たせる。案内済みかどうかだけを端末に記録
 // ============================================================
 
-const HINT_STORAGE_KEY = "catharsisfield.helpHinted";
+const HINT_STORAGE_KEY = "heartburst.helpHinted";
 
 let dialog: HTMLDialogElement | null = null;
 let isHintDone = false;

@@ -105,12 +105,12 @@ export class NoopAudioEngine implements AudioEngine {
   }
 }
 
-import { CatharsisAudioEngine } from "./catharsis-engine";
+import { HeartburstAudioEngine } from "./heartburst-engine";
 
 // URL に ?mute を付けると無音（視覚のみ）で起動できる
 export function createAudioEngine(): AudioEngine {
   if (new URLSearchParams(location.search).has("mute")) {
     return new NoopAudioEngine();
   }
-  return new CatharsisAudioEngine();
+  return new HeartburstAudioEngine();
 }

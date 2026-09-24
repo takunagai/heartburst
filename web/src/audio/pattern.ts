@@ -1,19 +1,19 @@
 // ============================================================
 // Strudel パターン層 ─ tidal/performance.tidal の写像（Tier 2 相当）
 //
-// - 外部値注入: signal(() => __catharsis.charge / .energy)
+// - 外部値注入: signal(() => __heartburst.charge / .energy)
 //   （クエリごとにコールバックが再実行されるため再評価不要）
 // - 音源は内蔵シンセのみ（外部 CDN サンプル不使用・オフライン動作）
 // - 失敗しても本体（音響エンジン+ビジュアル）は動く ─ オプショナル層
 // ============================================================
 
-import { controlSignals } from "./catharsis-engine";
+import { controlSignals } from "./heartburst-engine";
 import type { Chord } from "../music";
 
 let strudelModule: any = null;
 
 // Strudel スケジューラ（@strudel/core の Cyclist）のうち、拍位置の換算に使う内部フィールド。
-// 公開 API ではないため、読み出し側（catharsis-engine.ts）は欠損時に自前クロックへ退避する。
+// 公開 API ではないため、読み出し側（heartburst-engine.ts）は欠損時に自前クロックへ退避する。
 // 換算式は Cyclist の onTrigger と同一: 発音時刻 = (cycle - n0) / cps + s0 + latency
 export interface StrudelClock {
   started: boolean;
@@ -44,7 +44,7 @@ export async function startPatternLayer(
     // initAudioOnFirstClick は「次のクリック」を待ってしまう（ゲートのクリックは消費済み）。
     // ここは既にユーザー操作後なので worklet ロードを明示的に済ませる
     await strudel.initAudio?.();
-    (globalThis as any).__catharsis = controlSignals;
+    (globalThis as any).__heartburst = controlSignals;
     await strudel.evaluate(buildPatternCode(chord));
     strudelModule = strudel;
 
@@ -92,8 +92,8 @@ function buildPatternCode(chord: Chord): string {
   return `
 setcps(100/60/4)
 
-const charge = signal(() => __catharsis.charge)
-const energy = signal(() => __catharsis.energy)
+const charge = signal(() => __heartburst.charge)
+const energy = signal(() => __heartburst.energy)
 const tension = charge.add(energy)
 
 stack(

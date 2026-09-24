@@ -1,4 +1,4 @@
--- CatharsisField ─ Tidal パターン層（Tier 2）
+-- Heartburst ─ Tidal パターン層（Tier 2）
 -- Processing から localhost:6010 /ctrl (typetag "sf") で受信:
 --   charge: 溜めレベル 0..1（charging 中 30Hz）
 --   energy: 解放後エネルギー 1→0（約 3 秒で減衰）

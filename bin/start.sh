@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# CatharsisField 一括起動: SuperCollider → (Tidal) → Processing
+# Heartburst 一括起動: SuperCollider → (Tidal) → Processing
 # Tier 1 のみ起動: ./bin/start.sh --no-tidal
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCLANG="/Applications/SuperCollider.app/Contents/MacOS/sclang"
 PROCESSING="/Applications/Processing.app/Contents/MacOS/Processing"
-LOG_DIR="/tmp/catharsis"
+LOG_DIR="/tmp/heartburst"
 mkdir -p "$LOG_DIR"
 
 USE_TIDAL=1
@@ -28,10 +28,10 @@ PIDS+=($!)
 
 # ready 行が出るまで待つ（最大 30 秒）
 for i in $(seq 1 30); do
-  grep -q "CatharsisField audio ready" "$LOG_DIR/sc.log" 2>/dev/null && break
+  grep -q "Heartburst audio ready" "$LOG_DIR/sc.log" 2>/dev/null && break
   sleep 1
 done
-grep -q "CatharsisField audio ready" "$LOG_DIR/sc.log" || {
+grep -q "Heartburst audio ready" "$LOG_DIR/sc.log" || {
   echo "ERROR: SuperCollider が起動しない。$LOG_DIR/sc.log を確認"; cleanup
 }
 echo "      SuperCollider ready"
@@ -55,11 +55,11 @@ fi
 
 # 3. Processing（ビジュアル + 入力）
 echo "[3/3] Processing starting..."
-"$PROCESSING" cli --sketch="$ROOT/processing/CatharsisField" --run > "$LOG_DIR/processing.log" 2>&1 &
+"$PROCESSING" cli --sketch="$ROOT/processing/Heartburst" --run > "$LOG_DIR/processing.log" 2>&1 &
 PIDS+=($!)
 
 echo ""
-echo "CatharsisField 起動完了。ウィンドウを閉じるか Ctrl+C で全プロセス終了"
+echo "Heartburst 起動完了。ウィンドウを閉じるか Ctrl+C で全プロセス終了"
 echo "ログ: $LOG_DIR/{sc,tidal,processing}.log"
 wait
 cleanup

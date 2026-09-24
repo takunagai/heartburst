@@ -1,7 +1,7 @@
 // ============================================================
 // visuals.ts ─ Particle / Shockwave / 粒子描画 / ヴィネット生成
 //
-// 元は processing/CatharsisField/Particle.pde, Shockwave.pde の 1:1 移植。
+// 元は processing/Heartburst/Particle.pde, Shockwave.pde の 1:1 移植。
 // Phase 9-1 でウェブ版独自に拡張した（ネイティブ版は旧仕様のまま）:
 //   - 解放シーケンスの状態（inhale / impact）と時間倍率（スローモーション）
 //   - 速度ストリーク描画（p5 の stroke() を経由せず 2D context へ直接描く）

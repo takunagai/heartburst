@@ -1,7 +1,7 @@
 // ============================================================
 // tuning.ts ─ チューニング定数の一元管理
 //
-// processing/CatharsisField/CatharsisField.pde 冒頭の定数を移植したもの。
+// processing/Heartburst/Heartburst.pde 冒頭の定数を移植したもの。
 // 各定数のコメントは .pde 側の定数名を示す。値は変更していない
 // （状態機械の物理は 60fps 固定を前提にチューニングされているため、
 // フレームレート非依存化はせず main.ts 側で frameRate(60) を明示する）。

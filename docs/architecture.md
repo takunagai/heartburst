@@ -1,6 +1,6 @@
-# CatharsisField ─ アーキテクチャ・OSC プロトコル仕様
+# Heartburst ─ アーキテクチャ・OSC プロトコル仕様
 
-インタラクティブ・アート作品「CatharsisField」の設計正本。実装（Processing / SuperCollider / Tidal Cycles）はすべて本書の仕様に従う。仕様変更は必ず本書を先に更新する。
+インタラクティブ・アート作品「Heartburst」の設計正本。実装（Processing / SuperCollider / Tidal Cycles）はすべて本書の仕様に従う。仕様変更は必ず本書を先に更新する。
 
 ## コンセプト
 
@@ -15,7 +15,7 @@
 ```
 ┌─────────────────┐  OSC :57120   ┌──────────────────────┐
 │   Processing     │ ────────────→ │  SuperCollider        │
-│  CatharsisField  │               │  sclang + scsynth     │
+│  Heartburst  │               │  sclang + scsynth     │
 │  (視覚 + 入力)    │ ←──────────── │  カスタム SynthDef     │
 └─────────────────┘  OSC :12000   │  + SuperDirt          │
         │                          └──────────────────────┘
@@ -100,14 +100,14 @@ idle ──mousePressed──→ charging ──mouseReleased──→ releasing
 ## ディレクトリ構成
 
 ```
-visual-art/
+heartburst/
 ├── README.md                 # 起動手順
 ├── docs/
 │   ├── architecture.md       # 本書（設計正本）
 │   └── process-log.md        # 工程ログ（スキル化素材）
 ├── processing/
-│   └── CatharsisField/
-│       ├── CatharsisField.pde   # メイン・状態機械
+│   └── Heartburst/
+│       ├── Heartburst.pde   # メイン・状態機械
 │       ├── Particle.pde         # 粒子
 │       ├── Shockwave.pde        # 衝撃波リング
 │       └── OscBridge.pde        # OSC 送受信（oscP5）

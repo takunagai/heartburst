@@ -1,4 +1,4 @@
-// CatharsisField ─ SuperCollider 音響エンジン（Tier 1 コア + Tier 2 SuperDirt）
+// Heartburst ─ SuperCollider 音響エンジン（Tier 1 コア + Tier 2 SuperDirt）
 // 設計正本: docs/architecture.md
 // 起動: sclang sc/main.scd（IDE 不要・headless 動作）
 // 受信 OSC :57120（sclang 既定 langPort） / 送信 OSC :12000（Processing へ /sc/amp）
@@ -168,19 +168,19 @@ s.waitForBoot {
 	// 未導入環境でコンパイルエラーにしないため、クラス名を直接書かず asClass 経由で参照する
 	superDirtClass = \SuperDirt.asClass;
 	if(superDirtClass.notNil) {
-		"[CatharsisField] SuperDirt を検出 ─ Tier 2 を起動します".postln;
+		"[Heartburst] SuperDirt を検出 ─ Tier 2 を起動します".postln;
 		~dirt = superDirtClass.new(2, s);
 		~dirt.loadSoundFiles;
 		s.sync;
 		~dirt.start(~superDirtPort, 0 ! 12);
-		"[CatharsisField] SuperDirt 起動完了（port 57120）".postln;
+		"[Heartburst] SuperDirt 起動完了（port 57120）".postln;
 	} {
-		"[CatharsisField] SuperDirt 未導入 ─ Tier 1（カスタム SynthDef のみ）で動作".postln;
+		"[Heartburst] SuperDirt 未導入 ─ Tier 1（カスタム SynthDef のみ）で動作".postln;
 	};
 
 	s.sync;
 	"════════════════════════════════════════".postln;
-	"CatharsisField audio ready".postln;
+	"Heartburst audio ready".postln;
 	("  受信 OSC :" ++ NetAddr.langPort.asString ++ "  /charge/start /charge/level /release /pop").postln;
 	("  送信 OSC :" ++ ~processingPort.asString ++ " /sc/amp（マスター振幅 " ++ ~ampSendRate.asString ++ "Hz）").postln;
 	"════════════════════════════════════════".postln;

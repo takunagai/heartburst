@@ -1,7 +1,7 @@
 // ============================================================
 // main.ts ─ 状態機械 + p5 インスタンスモードのスケッチ本体
 //
-// 元は processing/CatharsisField/CatharsisField.pde の状態機械の移植。
+// 元は processing/Heartburst/Heartburst.pde の状態機械の移植。
 // Phase 9-1 で解放シーケンスをウェブ版独自に拡張した:
 //
 //   idle ──pointerdown──→ charging ──pointerup──→ inhale ──着弾時刻──→ impact ──ヒットストップ──→ decay ──→ idle
@@ -111,7 +111,7 @@ import { hintHelpOnce, initManual, isManualOpen } from "./manual";
 
 const audio = createAudioEngine();
 // チューニング・検証用に露出（本番でも害はない読み取り専用ハンドル）
-(window as unknown as { __catharsisAudio: unknown }).__catharsisAudio = audio;
+(window as unknown as { __heartburstAudio: unknown }).__heartburstAudio = audio;
 
 // AGPLv3（web/LICENSE）ソース公開の表記。リポジトリ URL は Phase 5 の公開時に確定
 console.info("Heartburst ─ licensed under AGPLv3. source: TBD");
@@ -1573,7 +1573,7 @@ const sketch = (p: p5) => {
     window.setTimeout(() => audio.preload(), 800);
 
     // 検証用の読み取り専用スナップショット（E2E で状態遷移・スローモーションを数値確認する）
-    (window as unknown as { __catharsisDebug: () => object }).__catharsisDebug = () => ({
+    (window as unknown as { __heartburstDebug: () => object }).__heartburstDebug = () => ({
       state,
       level,
       releaseLevel,
@@ -1793,6 +1793,23 @@ function initDiagnostics(): void {
   }, 500);
 }
 
+// 旧名（catharsisfield.*）で端末に記憶した設定を新しいキーへ引き継ぐ（2026-09-24 に Heartburst へ改名）。
+// 新しいキーに値が無いときだけ写し、旧キーは消す。記憶を読めない環境では何もしない
+function migrateLegacyStorage(): void {
+  try {
+    for (const name of ["lang", "helpHinted"]) {
+      const legacy = localStorage.getItem(`catharsisfield.${name}`);
+      if (legacy !== null && localStorage.getItem(`heartburst.${name}`) === null) {
+        localStorage.setItem(`heartburst.${name}`, legacy);
+      }
+      localStorage.removeItem(`catharsisfield.${name}`);
+    }
+  } catch {
+    // プライベートブラウズ等。引き継げなくても自動選択で動く
+  }
+}
+
+migrateLegacyStorage();
 initDiagnostics();
 // 開始の合図はタッチ端末なら「タップ」、マウスなら「クリック」（辞書のキーを差し替えてから言語を適用）
 const startLabel = document.getElementById("overlay-start");

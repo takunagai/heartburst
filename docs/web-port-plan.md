@@ -1,4 +1,4 @@
-# CatharsisField ウェブ版 ─ 移植・公開計画
+# Heartburst ウェブ版 ─ 移植・公開計画
 
 公開ルート: **p5.js + Web Audio (+ Strudel) で移植 → Cloudflare Workers（静的アセット）で公開**。
 ネイティブ版（SC + Processing + Tidal）はマスター版として維持し、ウェブ版は「誰でも触れる」配布版とする二本立て。

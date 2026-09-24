@@ -305,6 +305,16 @@
 - main へ早送りマージして本番デプロイ（版 289143e8）。本番でロゴ（webp 200）・タイトル・OGP・開始の合図・クリックで開始して音声 running・エラー 0 を確認
 - 旧名のまま残したもの（互換のため）: ネイティブ版のフォルダ名 `processing/CatharsisField/`（改名すると Processing スケッチとして開けない）、公開 URL と Worker 名 `catharsisfield`（リンク切れ防止）、localStorage のキー `catharsisfield.*`（利用者の記憶が消えるため）、過去の工程ログ・設計書
 
+## Phase 13: 名前を heartburst に統一（2026-09-24）
+
+- ユーザー指示: 作業用ブランチ 3 本の削除、URL を heartburst に（旧 URL の転送は不要・旧 Worker は削除）、プロジェクト名・フォルダ名その他を visual-art / CatharsisField から heartburst へ完全に統一
+- リポジトリ内: Worker 名 `heartburst`・package 名 `heartburst-web`・OGP の URL・localStorage キー `heartburst.*`（起動時に旧キー `catharsisfield.*` から引き継いで旧キーは削除）・開発用ハンドル `__heartburstAudio` / `__heartburstDebug` / Strudel の `__heartburst`・音響エンジン `heartburst-engine.ts` / `HeartburstAudioEngine`・ネイティブ版 `processing/Heartburst/Heartburst.pde`（Processing はメイン .pde 名 = フォルダ名が必須）・`bin/start.sh` と `sc/main.scd` の起動完了文字列・ログ `/tmp/heartburst`・設計書と README の見出し。過去の工程ログは当時の記録として残す
+- 検証: tsc・ビルド・Processing CLI でスケッチのコンパイル（Heartburst.class 生成）・start.sh の構文・旧キー → 新キーの引き継ぎ・新 URL で開始から音声 running と Strudel 起動まで・エラー 0
+- 本番: 新 Worker `heartburst`（https://heartburst.nagai-shouten.workers.dev、版 78b9ee0f）を公開して確認した後、旧 Worker `catharsisfield` を削除（旧 URL は 404）
+- 事故: 削除前に `yes n | wrangler delete` で確認プロンプトの有無だけを見るつもりが、wrangler は非対話環境で「はい」を既定値として通過し削除まで実行した。削除自体はユーザー承認済み・新 URL の確認後だったので実害なし。**破壊的な wrangler コマンドは `--dry-run` / `--help` で調べ、n をパイプで渡す試し方をしない**（memory: wrangler-noninteractive-auto-yes）
+- プロジェクトフォルダ（`~/Projects/Game/visual-art` → `~/Projects/Game/heartburst`）と Claude Code の作業データ・設定・Vault のセッション索引は、Claude Code を終了してから移行スクリプトで移す（起動中に移すと書き込み中の履歴や設定が壊れる／上書きされるため）
+- 別リポジトリ `~/Projects/agent-assets` のスキル interactive-art-builder が参照実装として `~/Projects/visual-art` を 5 か所で指している（元から古いパス）。そのリポジトリのセッションで直す
+
 ## 未解決・保留
 
 - 音の体感チューニング（音量バランス・ドロップの重さ・Tidal 混合比）はフィードバック駆動で随時。パラメータは全て定数化済み（README「チューニング」参照）

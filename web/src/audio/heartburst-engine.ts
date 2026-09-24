@@ -120,7 +120,7 @@ function createSilentMediaElement(): HTMLAudioElement {
 // パターン層（Strudel）と共有する連続値
 export const controlSignals = { charge: 0, energy: 0 };
 
-export class CatharsisAudioEngine implements AudioEngine {
+export class HeartburstAudioEngine implements AudioEngine {
   private ctx!: AudioContext;
   private fxIn!: GainNode;        // 残響ありの合流点（SC の ~fxBus 相当）
   private dryIn!: GainNode;       // 残響なしの合流点（低域の濁り回避。着弾の胴・ドロップ）

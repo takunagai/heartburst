@@ -80,7 +80,7 @@ D1 はゲーム性の案だが、種を D2 と共有するためこのフェー�
 ## 4. 検証の型（各フェーズ共通）
 
 - 実測ゲート: `pnpm build`（tsc + vite）
-- 自動 E2E: chrome-devtools で PointerEvent 合成（ゲート→溜め→解放・pop 連打）、コンソールエラー 0、`__catharsisAudio.getAmp()` で音の実出力を数値確認
+- 自動 E2E: chrome-devtools で PointerEvent 合成（ゲート→溜め→解放・pop 連打）、コンソールエラー 0、`__heartburstAudio.getAmp()` で音の実出力を数値確認
 - 性能: 各状態の fps とフレーム間隔分布（省エネ rAF 制限と真の負荷を区別 ─ process-log Phase 6 の罠 7）
 - 体感: PC スピーカー / ヘッドホン / スマホ実機で人間が試聴・操作（機械判定できないので省略しない）
 - デプロイはフェーズごとにユーザー確認のうえ実施

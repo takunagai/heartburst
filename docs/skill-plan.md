@@ -1,6 +1,6 @@
 # interactive-art-builder スキル化計画
 
-CatharsisField 制作工程（`docs/process-log.md` 全 7 フェーズ）を一般化し、「ビジュアル × サウンド × インタラクション」の作品を対話から公開まで導くユーザースキルにする。
+Heartburst 制作工程（`docs/process-log.md` 全 7 フェーズ）を一般化し、「ビジュアル × サウンド × インタラクション」の作品を対話から公開まで導くユーザースキルにする。
 
 - スコープ: **インタラクティブ・アート全般**（感情ゴール駆動。カタルシスは 1 プリセット）
 - プラットフォーム: **ウェブ（p5.js + Web Audio + Strudel）+ ネイティブ（SuperCollider + Processing + Tidal Cycles）両対応**
@@ -88,7 +88,7 @@ Phase 7 工程ログ・還流     → process-log.md 記録、新規ハマりど
     └── native/                  # main.scd 骨格 / OscBridge.pde / start.sh / test-osc.scd
 ```
 
-- テンプレは**骨格**（構造・契約・コメント）に留め、フルコードは `~/Projects/visual-art` を参照実装としてパス記載（ローカル利用前提のユーザースキルなので有効。消えてもテンプレだけで動く二段構え）
+- テンプレは**骨格**（構造・契約・コメント）に留め、フルコードは `~/Projects/Game/heartburst` を参照実装としてパス記載（ローカル利用前提のユーザースキルなので有効。消えてもテンプレだけで動く二段構え）
 - スキルディレクトリに生成物を置かない（全プロジェクト共通規約どおり）
 
 ## 5. 焼き込む知識ベース（pitfalls.md ─ 今回の実証済み知見）
@@ -107,7 +107,7 @@ Phase 7 工程ログ・還流     → process-log.md 記録、新規ハマりど
 | 1 | SKILL.md + wizard.md（対話 UX が核） | Fable | frontmatter・トリガー・3 ラウンド完記 |
 | 2 | stack-web.md / stack-native.md / verification.md / pitfalls.md | sonnet 委譲（正本 = process-log 等の事実リストを渡す） | 正本との突合レビューを Fable が実施 |
 | 3 | templates/ 抽出（実装から骨格化） | sonnet 委譲 | 骨格が単体でコンパイル可能（型・構文チェック） |
-| 4 | architecture-template.md | Fable | CatharsisField の architecture.md を汎化 |
+| 4 | architecture-template.md | Fable | Heartburst の architecture.md を汎化 |
 | 5 | スモークテスト: 新規空ディレクトリでスキル起動 → ウィザード完走 → 最小作品（ウェブ Tier 1）が鳴って動く | Fable + 検証ハーネス | E2E 数値検証パス + ユーザー体感確認 |
 | 6 | 番号リスト・フォールバックの動作確認（AskUserQuestion を使わない指示で再走） | Fable | 対話が破綻しない |
 
