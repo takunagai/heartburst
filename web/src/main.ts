@@ -149,6 +149,8 @@ interface Seed {
   hue: number;
   pan: number;
   flash: number; // 鳴った瞬間 1 → 減衰
+  detonateAtMillis?: number; // 波が届いて誘爆を予約した時刻（音は 16 分の拍に置いてある）
+  chainIndex?: number; // 予約した順番（1 から）
 }
 const seeds: Seed[] = [];
 const MAX_SEEDS = 16;
@@ -156,6 +158,7 @@ const SEED_WAVE_LEVEL = 0.1; // 誘爆した種が出す波の大きさ（届く
 const CHAIN_FINALE_COUNT = 6; // この連鎖数に達すると大輪の締め
 let lastBarPhase = 0;
 let chainCount = 0;
+let chainArmCount = 0; // 誘爆を予約した数（弾けた数は chainCount）
 let chainLabel = { count: 0, x: 0, y: 0, atMillis: Number.NEGATIVE_INFINITY, hue: 0 };
 let chordHueShift = 0;
 
@@ -622,6 +625,7 @@ function triggerImpact(now: number): void {
   hitstopEndMillis = now + lerp(HITSTOP_MS_MIN, HITSTOP_MS_MAX, intensity) * hitstopScale;
   state = "impact";
   chainCount = 0;
+  chainArmCount = 0;
   scheduleSecondaryBursts(hitstopEndMillis);
 }
 
@@ -629,15 +633,24 @@ function triggerImpact(now: number): void {
 
 function plantSeed(px: number, py: number, nx: number, midi: number): void {
   seeds.push({ x: px, y: py, slot: audio.getNearestSlot(), midi, hue: midiHue(midi), pan: nx * 2 - 1, flash: 1 });
-  if (seeds.length > MAX_SEEDS) seeds.shift(); // 古い種から消える
+  if (seeds.length > MAX_SEEDS) {
+    // 古い種から消える。誘爆を予約済みの種は音が決まっているので残す
+    const oldest = seeds.findIndex((seed) => seed.detonateAtMillis === undefined);
+    seeds.splice(Math.max(oldest, 0), 1);
+  }
   syncSeeds();
 }
 
 function syncSeeds(): void {
-  audio.setSeeds(seeds.map((seed) => ({ slot: seed.slot, midi: seed.midi, pan: seed.pan })));
+  audio.setSeeds(
+    seeds
+      .filter((seed) => seed.detonateAtMillis === undefined)
+      .map((seed) => ({ slot: seed.slot, midi: seed.midi, pan: seed.pan })),
+  );
 }
 
-// 本波（main）の波面が種に届いたら誘爆
+// 本波（main）の波面が種に届いたら誘爆を予約し、16 分の拍に 1 個ずつ弾く。
+// 届いた瞬間に弾くと、波が 0.2 秒ほどで画面を覆うため全部がほぼ同時に弾けて連鎖に見えなかった
 function updateSeeds(p: p5): void {
   // 小節の位置が種のスロットを跨いだら光らせる（音はエンジン側が先読みで鳴らしている）
   const phase = audio.getBarPhase();
@@ -650,20 +663,33 @@ function updateSeeds(p: p5): void {
   lastBarPhase = phase;
 
   if (seeds.length === 0) return;
+  let hasArmed = false;
   for (const wave of shockwaves) {
     if (!wave.active || wave.kind !== "main" || wave.delayFrames > 0) continue;
-    for (let i = seeds.length - 1; i >= 0; i--) {
-      const seed = seeds[i];
+    for (const seed of seeds) {
+      if (seed.detonateAtMillis !== undefined) continue;
       if (Math.hypot(seed.x - wave.x, seed.y - wave.y) <= wave.radius) {
-        seeds.splice(i, 1);
-        detonateSeed(p, seed);
+        chainArmCount++;
+        const delaySec = audio.seedBurst(seed.midi, seed.pan, chainArmCount);
+        seed.detonateAtMillis = p.millis() + delaySec * 1000;
+        seed.chainIndex = chainArmCount;
+        hasArmed = true;
       }
     }
+  }
+  if (hasArmed) syncSeeds(); // 予約した種はループから外す（誘爆音と二重に鳴らさない）
+
+  const now = p.millis();
+  for (let i = seeds.length - 1; i >= 0; i--) {
+    const seed = seeds[i];
+    if (seed.detonateAtMillis === undefined || seed.detonateAtMillis > now) continue;
+    seeds.splice(i, 1);
+    detonateSeed(p, seed);
   }
 }
 
 function detonateSeed(p: p5, seed: Seed): void {
-  chainCount++;
+  chainCount = seed.chainIndex ?? chainCount + 1;
   spawnShockwave(seed.x, seed.y, SEED_WAVE_LEVEL, "main", seed.hue, 80);
   spawnShockwave(seed.x, seed.y, 0.2, "tier", seed.hue, 50);
   for (let i = 0; i < 50; i++) {
@@ -671,7 +697,6 @@ function detonateSeed(p: p5, seed: Seed): void {
     particles[idx].popSpark(seed.x, seed.y, 1.7);
   }
   popSparkCursor = (popSparkCursor + 50) % particles.length;
-  audio.seedBurst(seed.midi, seed.pan, chainCount);
   shakeIntensity = Math.max(shakeIntensity, Math.min(3 + chainCount * 0.8, 12));
   chainLabel = { count: chainCount, x: seed.x, y: seed.y, atMillis: p.millis(), hue: seed.hue };
   vibrate(15);
@@ -711,7 +736,8 @@ function drawSeeds(p: p5, ctx: CanvasRenderingContext2D): void {
   }
   const twinkle = 0.85 + 0.15 * Math.sin(p.millis() * 0.006);
   for (const seed of seeds) {
-    const glow = seed.flash;
+    // 誘爆の予約中は明るく震わせて「次に弾ける」ことを見せる
+    const glow = seed.detonateAtMillis === undefined ? seed.flash : Math.max(seed.flash, 0.75 + 0.25 * Math.sin(p.millis() * 0.05));
     const halo = (14 + glow * 22) * twinkle;
     const gradient = ctx.createRadialGradient(seed.x, seed.y, 0, seed.x, seed.y, halo);
     gradient.addColorStop(0, `hsla(${seed.hue}, 90%, 75%, ${0.55 + 0.45 * glow})`);

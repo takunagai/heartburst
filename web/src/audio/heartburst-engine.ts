@@ -143,6 +143,7 @@ export class HeartburstAudioEngine implements AudioEngine {
   private chordIndex = 0;
   private seeds: SeedNote[] = [];
   private nextSeqTime = 0;
+  private nextSeedBurstTime = 0; // 次の誘爆を置ける最も早い時刻（同じ拍に重ねない）
   private setPatternChord: ((chord: Chord) => void) | null = null;
   private fallbackOrigin = 0;
 
@@ -1001,10 +1002,13 @@ export class HeartburstAudioEngine implements AudioEngine {
     this.nextSeqTime = horizon;
   }
 
-  // 種の誘爆: その種の音を強く + パチパチ。連鎖が進むほど明るく（少し大きく）
-  seedBurst(midi: number, pan: number, chainIndex: number): void {
-    if (!this.isReady) return;
-    const t = this.ctx.currentTime;
+  // 種の誘爆: その種の音を強く + パチパチ。連鎖が進むほど明るく（少し大きく）。
+  // 次の 16 分の拍に置き、続く誘爆は 1 拍ずつ後ろへ並べる（連鎖を目で追える間隔 = 100 BPM で 150ms）
+  seedBurst(midi: number, pan: number, chainIndex: number): number {
+    if (!this.isReady) return 0;
+    const now = this.ctx.currentTime;
+    const t = this.nextGridTime(Math.max(now + 0.03, this.nextSeedBurstTime), SEQ_STEPS);
+    this.nextSeedBurstTime = t + 0.01;
     const amp = Math.min(0.28 + chainIndex * 0.03, 0.5);
     this.pluck(midi, amp, pan, SEED_DECAY, t);
     const octaveUp = midi + 12;
@@ -1015,6 +1019,8 @@ export class HeartburstAudioEngine implements AudioEngine {
     for (let i = 0; i < 4; i++) {
       this.noiseHit(t + Math.random() * 0.06, "highpass", 4000 + Math.random() * 4000, 0.8, 0.07, 0.015, panner);
     }
+    const outputLatency = this.ctx.outputLatency || this.ctx.baseLatency || 0;
+    return t - now + outputLatency;
   }
 
   // Karplus-Strong プラック（\shimmer / \popPluck の写像）

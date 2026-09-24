@@ -42,7 +42,7 @@ export interface AudioEngine {
   sparkBurst(x: number, intensity: number, style: BurstStyle): void; // 二次爆発（花火の連鎖）
   pop(x: number, y: number, midi: number): void; // midi は music.tapToMidi で算出
   setSeeds(seeds: SeedNote[]): void; // 種のループシーケンサーの内容（変更時に全量を渡す）
-  seedBurst(midi: number, pan: number, chainIndex: number): void; // 種の誘爆音
+  seedBurst(midi: number, pan: number, chainIndex: number): number; // 種の誘爆音を次の空いている 16 分の拍に置き、聞こえるまでの秒数を返す
   getBarPhase(): number; // 小節内の位置 0..1（聞こえている位置）
   getNearestSlot(): number; // 今に最も近い 16 分の位置 0..15
   getChordIndex(): number; // コード進行の位置
@@ -77,7 +77,13 @@ export class NoopAudioEngine implements AudioEngine {
   }
   sparkBurst(): void {}
   setSeeds(): void {}
-  seedBurst(): void {}
+  private nextSeedBurstMillis = 0;
+  seedBurst(): number {
+    const now = performance.now();
+    const at = Math.ceil(Math.max(now + 30, this.nextSeedBurstMillis) / 150) * 150; // 100 BPM の 16 分
+    this.nextSeedBurstMillis = at + 10;
+    return (at - now) / 1000;
+  }
   getBarPhase(): number {
     return (performance.now() % 2400) / 2400;
   }
